@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.gradle/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+test-results/
+playwright-report/
+results.xml
+kotlin/
+lint-results*/
+out/
