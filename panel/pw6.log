@@ -1,0 +1,11 @@
+
+Running 6 tests using 1 worker
+
+  ok 1 tests\e2e\panel.spec.js:14:1 › login happy path lands on devices (732ms)
+  ok 2 tests\e2e\panel.spec.js:21:1 › wrong password shows error message (503ms)
+  ok 3 tests\e2e\panel.spec.js:27:1 › list renders 3 fixture devices with correct badges (690ms)
+  ok 4 tests\e2e\panel.spec.js:41:1 › reconnect and delete fire the right requests (1.5s)
+  ok 5 tests\e2e\panel.spec.js:58:1 › unrecoverable 401 mid-session redirects to login (1.5s)
+  ok 6 tests\e2e\panel.spec.js:71:1 › command selector sends chosen command (2.3s)
+
+  6 passed (13.9s)

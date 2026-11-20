@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Worm Gitty — لوحة التحكم</title>
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body x-data="panelRoot">
+  <span data-testid="app-ready" style="display:none" :data-ready="ready ? '1':'0'"></span>
+  <div class="topbar">
+    <span class="brand">Worm Gitty</span>
+    <nav x-show="$store.panel.user" class="nav">
+      <button data-testid="nav-android" @click="$store.panel.show('#/devices?platform=android')">أندرويد</button>
+      <button data-testid="nav-windows" @click="$store.panel.show('#/devices?platform=windows')">ويندوز</button>
+      <button data-testid="nav-all" @click="$store.panel.show('#/devices')">الكل</button>
+      <button data-testid="logout" @click="$store.panel.logout()">خروج</button>
+    </nav>
+  </div>
+
+  <!-- LOGIN -->
+  <main id="screen-login" x-show="$store.panel.route.name === 'login'">
+    <form class="card login-card" data-testid="login-form" @submit.prevent="$store.panel.startLogin(email, password)">
+      <h1>دخول المشغّل</h1>
+      <input data-testid="email" name="email" type="email" placeholder="البريد" x-model="email" required />
+      <input data-testid="password" name="password" type="password" placeholder="كلمة المرور" x-model="password" required />
+      <button data-testid="login-submit" type="submit">ادخل</button>
+      <p data-testid="login-error" class="error" x-show="$store.panel.loginError" x-text="$store.panel.loginError"></p>
+    </form>
+  </main>
+
+  <!-- DEVICES LIST -->
+  <main id="screen-devices" x-show="$store.panel.route.name === 'devices'" x-init="">
+    <section class="state-block" data-testid="devices-loading" x-show="$store.panel.view === 'loading'">تحميل…</section>
+
+    <section class="state-block" data-testid="devices-empty" x-show="$store.panel.view === 'empty'">
+      مفيش أجهزة على المنصة دي.
+    </section>
+
+    <section class="state-block" data-testid="devices-offline" x-show="$store.panel.view === 'offline'">
+      <span x-text="$store.panel.message"></span>
+    </section>
+
+    <section class="state-block" data-testid="devices-cooldown" x-show="$store.panel.view === 'cooldown'">
+      <span x-text="$store.panel.message"></span>
+      (<span data-testid="cooldown-seconds" x-text="$store.panel.cooldownLeft"></span> ثانية)
+    </section>
+
+    <section class="state-block" data-testid="devices-server-error" x-show="$store.panel.view === 'server-error'">
+      <span x-text="$store.panel.message"></span>
+      <button data-testid="devices-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
+    </section>
+
+    <table data-testid="devices-table" x-show="$store.panel.view === 'ready'" class="card">
+      <thead>
+        <tr><th>الاسم</th><th>الموبايل</th><th>الموديل</th><th>Sdk</th><th>الحالة</th><th>آخر ظهور</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="d in $store.panel.devices" :key="d.id">
+          <tr :data-testid="'device-row-' + d.id" @click="$store.panel.show('#/devices/' + d.id)">
+            <td x-text="d.name"></td>
+            <td x-text="$store.panel.formatE164(d.phone)"></td>
+            <td x-text="d.model"></td>
+            <td x-text="d.sdk"></td>
+            <td><span :class="$store.panel.badgeOf(d.state).className" x-text="$store.panel.badgeOf(d.state).label"></span></td>
+            <td x-text="new Date(d.lastSeen).toLocaleString('ar-EG')"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </main>
+
+  <!-- DEVICE DETAIL -->
+  <main id="screen-device" x-show="$store.panel.route.name === 'device-detail'">
+    <section class="state-block" x-show="$store.panel.view === 'loading'" data-testid="device-loading">تحميل…</section>
+    <section class="state-block" x-show="$store.panel.view === 'offline'" data-testid="device-offline">
+      <span x-text="$store.panel.message"></span>
+    </section>
+    <section class="state-block" x-show="$store.panel.view === 'server-error'" data-testid="device-server-error">
+      <span x-text="$store.panel.message"></span>
+      <button data-testid="device-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
+    </section>
+
+    <article class="card" data-testid="device-card" x-show="$store.panel.view === 'ready'">
+      <h2 data-testid="detail-name" x-text="$store.panel.detail?.name"></h2>
+      <p>
+        <span data-testid="detail-phone" x-text="$store.panel.formatE164($store.panel.detail?.phone)"></span>
+        — <span data-testid="detail-model" x-text="$store.panel.detail?.model"></span>
+        — <span data-testid="detail-state" :class="$store.panel.badgeOf($store.panel.detail?.state).className"
+              x-text="$store.panel.badgeOf($store.panel.detail?.state).label"></span>
+      </p>
+      <div class="actions">
+        <button data-testid="detail-reconnect" @click="$store.panel.reconnect($store.panel.route.id)">إعادة ربط</button>
+        <button data-testid="detail-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">حذف</button>
+        <select data-testid="command-select" x-model="$store.panel.commandChoice">
+          <option value="ping">ping</option>
+          <option value="sync_config">sync_config</option>
+        </select>
+        <button data-testid="command-send" @click="$store.panel.sendCommand($store.panel.route.id)">ابعت</button>
+        <span data-testid="command-flash" x-show="$store.panel.flash" x-text="$store.panel.flash"></span>
+      </div>
+    </article>
+  </main>
+</body>
+</html>

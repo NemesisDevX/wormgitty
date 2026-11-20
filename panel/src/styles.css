@@ -1,0 +1,28 @@
+:root { font-family: "Segoe UI", Tahoma, sans-serif; }
+body { margin: 0; background: #10151c; color: #e8eaed; min-height: 100vh; }
+.topbar { display: flex; gap: 16px; align-items: center; padding: 12px 20px; background: #171d26; border-bottom: 1px solid #232b36; }
+.brand { color: #ef5350; font-weight: 700; letter-spacing: 1px; }
+.nav button, .actions button, .state-block button, .login-card button {
+  background: #232b36; color: #e8eaed; border: 1px solid #2e3947; border-radius: 6px;
+  padding: 6px 14px; cursor: pointer; margin-inline-start: 6px;
+}
+.nav button:hover, .actions button:hover { background: #2e3947; }
+.card { background: #171d26; border: 1px solid #232b36; border-radius: 10px; padding: 18px; margin: 20px; }
+main { padding: 8px; }
+.error { color: #ef9a9a; }
+.state-block { padding: 32px; text-align: center; color: #b0bec5; font-size: 18px; }
+.login-card { max-width: 360px; margin: 80px auto; display: grid; gap: 12px; }
+.login-card input { background: #10151c; border: 1px solid #2e3947; color: #e8eaed; padding: 8px; border-radius: 6px; }
+table { width: calc(100% - 40px); border-collapse: collapse; }
+th, td { text-align: right; padding: 10px 12px; border-bottom: 1px solid #232b36; cursor: pointer; }
+tbody tr:hover { background: #1c2430; }
+.badge { padding: 2px 10px; border-radius: 999px; font-size: 13px; }
+.badge-online { background: #1b5e20; color: #c8e6c9; }
+.badge-offline { background: #455a64; color: #cfd8dc; }
+.badge-syncing { background: #01579b; color: #b3e5fc; }
+.badge-error { background: #b71c1c; color: #ffcdd2; }
+.badge-unknown { background: #37474f; color: #eceff1; }
+.actions { display: flex; gap: 10px; align-items: center; }
+.actions button.danger { border-color: #b71c1c; color: #ef9a9a; }
+select[data-testid="command-select"] { background: #10151c; color: #e8eaed; border: 1px solid #2e3947; border-radius: 6px; padding: 6px; }
+[x-cloak] { display: none !important; }
