@@ -1,0 +1,22 @@
+name: wormgitty_backend_v0
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wormgitty_pg
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_USER: wormgitty
+      POSTGRES_PASSWORD: backend_dev_pw
+      POSTGRES_DB: wormgitty_backend
+    volumes:
+      - wormgitty_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wormgitty -d wormgitty_backend"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  wormgitty_pg_data:

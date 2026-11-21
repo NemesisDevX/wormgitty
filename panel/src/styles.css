@@ -25,4 +25,14 @@ tbody tr:hover { background: #1c2430; }
 .actions { display: flex; gap: 10px; align-items: center; }
 .actions button.danger { border-color: #b71c1c; color: #ef9a9a; }
 select[data-testid="command-select"] { background: #10151c; color: #e8eaed; border: 1px solid #2e3947; border-radius: 6px; padding: 6px; }
+.warn { color: #ffd54f; }
+.confirm-cluster { display: inline-flex; gap: 8px; align-items: center; }
+.photos hr { border-color: #232b36; margin: 18px 0; }
+.photos h3 { margin-top: 0; }
+.queue th, .queue td { cursor: default; }
+.badge-q-queued { background: #37474f; color: #eceff1; }
+.badge-q-uploading { background: #01579b; color: #b3e5fc; }
+.badge-q-done { background: #1b5e20; color: #c8e6c9; }
+.badge-q-failed { background: #b71c1c; color: #ffcdd2; }
+.st-failed td { opacity: .75; }
 [x-cloak] { display: none !important; }

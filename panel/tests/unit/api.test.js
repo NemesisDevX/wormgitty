@@ -1,7 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
-import { ApiError, apiFetch, getAccessToken, refreshTokens, setAccessToken } from "../../src/lib/api.js";
+import {
+  ApiError,
+  apiFetch,
+  getAccessToken,
+  login,
+  refreshTokens,
+  setAccessToken,
+} from "../../src/lib/api.js";
+
+const BASE = "/api/v1/admin";
 
 const server = setupServer();
 
@@ -14,23 +23,12 @@ beforeEach(() => {
   setAccessToken(null);
 });
 
-function authedHandler(capture, body = { ok: true }) {
-  return http.get("/api/devices", ({ request }) => {
-    capture.push(request.headers.get("authorization"));
-    if (!capture.bearerSeen) {
-      capture.bearerSeen = true;
-      return HttpResponse.json(body, { status: 401 });
-    }
-    return HttpResponse.json(body);
-  });
-}
-
-describe("apiFetch", () => {
+describe("apiFetch transport", () => {
   it("attaches the in-memory access token as Bearer", async () => {
     setAccessToken("tok-abc");
     const bearer = [];
     server.use(
-      http.get("/api/devices", ({ request }) => {
+      http.get(`${BASE}/devices`, ({ request }) => {
         bearer.push(request.headers.get("authorization"));
         return HttpResponse.json([]);
       })
@@ -45,32 +43,35 @@ describe("apiFetch", () => {
     let refreshCalls = 0;
     const authHeader = [];
     server.use(
-      http.post("/api/auth/refresh", () => {
+      http.post(`${BASE}/auth/refresh`, () => {
         refreshCalls++;
         return HttpResponse.json({ accessToken: "fresh-tok", refreshToken: "rt-2" });
       }),
-      authedHandler(authHeader)
+      http.get(`${BASE}/devices`, ({ request }) => {
+        authHeader.push(request.headers.get("authorization"));
+        if (authHeader.length === 1) return HttpResponse.json({ ok: 0 }, { status: 401 });
+        return HttpResponse.json({ ok: true });
+      })
     );
     const out = await apiFetch("/devices");
     expect(out).toEqual({ ok: true });
     expect(refreshCalls).toBe(1);
     expect(authHeader[0]).toBe("Bearer expired-tok");
     expect(authHeader[1]).toBe("Bearer fresh-tok");
-    expect(localStorage.getItem("refresh_token")).toBe("rt-2");
     expect(getAccessToken()).toBe("fresh-tok");
   });
 
   it("throws ApiError(401) when refresh also fails", async () => {
     setAccessToken("expired");
     server.use(
-      http.post("/api/auth/refresh", () => HttpResponse.json({}, { status: 401 })),
-      http.get("/api/devices", () => HttpResponse.json({}, { status: 401 }))
+      http.post(`${BASE}/auth/refresh`, () => HttpResponse.json({}, { status: 401 })),
+      http.get(`${BASE}/devices`, () => HttpResponse.json({}, { status: 401 }))
     );
     await expect(apiFetch("/devices")).rejects.toMatchObject({ status: 401 });
   });
 
   it("surfaces network failure as ApiError(0)", async () => {
-    server.use(http.get("/api/devices", () => HttpResponse.error()));
+    server.use(http.get(`${BASE}/devices`, () => HttpResponse.error()));
     let caught;
     try {
       await apiFetch("/devices");
@@ -79,5 +80,38 @@ describe("apiFetch", () => {
     }
     expect(caught).toBeInstanceOf(ApiError);
     expect(caught.status).toBe(0);
+  });
+
+  it("html response from the dev server raises 502 instead of an empty list", async () => {
+    const fetchImpl = async () => ({
+      ok: true, status: 200,
+      headers: { get: () => "text/html; charset=utf-8" },
+      json: async () => { throw new Error("not json"); },
+    });
+    await expect(apiFetch("/devices", {}, 0, fetchImpl)).rejects.toMatchObject({ status: 502 });
+  });
+
+  it("login stores tokens on success", async () => {
+    server.use(
+      http.post(`${BASE}/auth/login`, () =>
+        HttpResponse.json({ accessToken: "acc-1", refreshToken: "ref-1", user: { email: "e" } })
+      )
+    );
+    const body = await login("ops@wormgitty.local", "w0rm-gitty-pass");
+    expect(body.accessToken).toBe("acc-1");
+    expect(getAccessToken()).toBe("acc-1");
+    expect(localStorage.getItem("refresh_token")).toBe("ref-1");
+  });
+
+  it("refreshTokens swaps the stored refresh token", async () => {
+    localStorage.setItem("refresh_token", "old-ref");
+    server.use(
+      http.post(`${BASE}/auth/refresh`, () =>
+        HttpResponse.json({ accessToken: "acc-2", refreshToken: "new-ref" })
+      )
+    );
+    expect(await refreshTokens()).toBe(true);
+    expect(getAccessToken()).toBe("acc-2");
+    expect(localStorage.getItem("refresh_token")).toBe("new-ref");
   });
 });

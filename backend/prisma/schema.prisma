@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  passHash  String   @map("pass_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+  devices   Device[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Device {
+  id             String    @id @default(uuid())
+  ownerId        String    @map("owner_id")
+  name           String
+  phone          String
+  platform       String
+  variant        String    @default("standard")
+  enrollTokenHash String   @map("enroll_token_hash")
+  status         String    @default("offline")
+  lastSeen       DateTime  @default(now()) @map("last_seen")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  owner          User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  commands       Command[]
+
+  @@index([ownerId])
+  @@index([enrollTokenHash])
+  @@map("devices")
+}
+
+model Command {
+  id        String    @id @default(uuid())
+  deviceId  String    @map("device_id")
+  type      String
+  payload   Json      @default("{}")
+  state     String    @default("queued")
+  result    String?
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@map("commands")
+}
