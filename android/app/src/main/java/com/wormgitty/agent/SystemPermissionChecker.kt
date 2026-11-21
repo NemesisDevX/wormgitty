@@ -1,6 +1,5 @@
 package com.wormgitty.agent
 
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -10,20 +9,16 @@ import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
-import android.view.accessibility.AccessibilityManager
 import androidx.core.app.NotificationManagerCompat
 
 class SystemPermissionChecker : PermissionChecker {
     override fun states(ctx: Context): Map<PermKey, Boolean> {
-        val am = ctx.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
         val adminComp = ComponentName(ctx, AdminRcv::class.java)
         return mapOf(
             PermKey.OVERLAY to Settings.canDrawOverlays(ctx),
-            PermKey.ACCESSIBILITY to am.getEnabledAccessibilityServiceList(
-                AccessibilityServiceInfo.FEEDBACK_ALL_MASK
-            ).any { it.resolveInfo.serviceInfo.packageName == ctx.packageName },
+            PermKey.ACCESSIBILITY to isA11yEnabled(ctx),
             PermKey.ALL_FILES to allFilesGranted(),
             PermKey.BATTERY_OPT to pm.isIgnoringBatteryOptimizations(ctx.packageName),
             PermKey.DEVICE_ADMIN to dpm.isAdminActive(adminComp),
@@ -31,8 +26,30 @@ class SystemPermissionChecker : PermissionChecker {
         )
     }
 
+    /**
+     * Real read of Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES: the value is
+     * a colon-separated list of ComponentName flattens, e.g.
+     * "com.wormgitty.agent/com.wormgitty.agent.WormA11yService".
+     */
+    private fun isA11yEnabled(ctx: Context): Boolean {
+        val enabled = Settings.Secure.getString(
+            ctx.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        val wanted = "${ctx.packageName}/${WormA11yService::class.java.name}"
+        return enabled.split(':')
+            .map { it.trim() }
+            .any { it.equals(wanted, ignoreCase = false) }
+    }
+
     private fun allFilesGranted(): Boolean =
-        Build.VERSION.SDK_INT < 30 || Environment.isExternalStorageManager()
+        if (Build.VERSION.SDK_INT < 30) true else try {
+            Environment.isExternalStorageManager()
+        } catch (_: RuntimeException) {
+            // Some Robolectric environments lack volume state for this call;
+            // defaulting to not-granted is the safe reading of an unavailable probe.
+            false
+        }
 }
 
 class SystemPermissionOpener : PermissionOpener {
