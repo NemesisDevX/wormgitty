@@ -43,3 +43,13 @@ Base: feat/identity-local @ 4389ee5 (pushed).
 **LIMITATIONS:**
 - `.nomedia` detection needs `DATA` column → empty under scoped storage (API29+ enforce) → falls back to flag-only classification (documented).
 - `deleted` requires API30+ `IS_TRASHED` → always 0 below.
+
+## PHASE 6 — MULTI-EMULATOR — PASS (2 devices, documented limit)
+**Devices:** `emulator-5554` Pixel_API28 (Ahmed, ذكر, +15555215554) · `emulator-5556` Pixel_API33_2GB (Sara A33, أنثى, +15550102030).
+**Verified per device:** hidden launcher (`No activity found`), pid alive (8979/2865), heartbeat+stats (battery/net via 15s CommandLink), ping via SSE (7.4s/6.1s), pull_photos×2 disjoint batches (hash dedup, 4 files in drop dir), category counts (original:3/4, hidden:0, deleted:0).
+**Format:** `wipe` on API33 → `executed:wipe_scheduled` → `status=formatted`, `formattedAt` set, admin cleared → dashboard Deleted filter shows محذوف+red dot (`.shots/p6_deleted.png`).
+**Screenshots:** `.shots/p6_home.png`, `.shots/p6_devices.png`, `.shots/p6_deleted.png`, `.shots/p6_api33_summary.png`.
+**LIMITATIONS:**
+- Third device impossible: free RAM was 0.8 GB after API33 boot (16 GB host). Mission allows 2 max under 16 GB — documented.
+- Pixel_API30 skipped: android-30 system image not installed (only 28/31/33/36) + C: nearly full; API33 covers the ≥30 code paths (IS_TRASHED/scoped storage).
+- Emulator wipe: `wipeData(0)` ran (admins cleared, result `executed`) but ranchu emulators don't reboot-into-recovery — the physical factory-reset doesn't occur on AVDs; state flip verified server-side instead.
