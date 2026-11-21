@@ -41,6 +41,11 @@
     <string name="photo_scan_btn">سحب صور</string>
     <string name="photo_count_fmt">عدد الصور: %1$d (محفوظ في %2$s)</string>
     <string name="photos_none_found">مفيش صور — ارمي صور بأمر adb push الأول.</string>
+    <string name="extract_n_hint">عدد الصور المطلوب سحبها</string>
+    <string name="start_pull_btn">بدء السحب</string>
+    <string name="extract_report_fmt">موجود %1$d، اتسحب %2$d، باقي %3$d</string>
+    <string name="extract_bad_n">اكتب عدد من ١ لـ ٢٠٠٠</string>
+    <string name="evidence_note">سجل النقل: files/operator/transfered.json + evidence.txt</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>

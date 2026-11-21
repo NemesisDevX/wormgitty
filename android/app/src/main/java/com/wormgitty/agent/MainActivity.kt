@@ -510,6 +510,49 @@ fun WizardScreen(
                         fontSize = 14.sp,
                         modifier = Modifier.testTag("photo_count_text")
                     )
+
+                    // Batch extraction: N (1..2000) + "بدء السحب" + live report.
+                    var extractN by remember { mutableStateOf("2") }
+                    var extractMsg by remember { mutableStateOf<String?>(null) }
+                    val badNText = stringResource(R.string.extract_bad_n)
+                    val reportTemplate = stringResource(R.string.extract_report_fmt)
+                    OutlinedTextField(
+                        value = extractN,
+                        onValueChange = { extractN = it.filter { ch -> ch.isDigit() }.take(4) },
+                        label = { Text(stringResource(R.string.extract_n_hint)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("extract_n_input")
+                    )
+                    Button(
+                        onClick = {
+                            val n = extractN.toIntOrNull() ?: 0
+                            if (n < 1 || n > 2000) {
+                                extractMsg = "!$badNText"
+                                return@Button
+                            }
+                            val puller = MediaStorePuller(activityCtx, AndroidKeystoreKeySource())
+                            val res = puller.pullOldest(n)
+                            extractMsg = reportTemplate
+                                .replace("%1\$d", res.existing.toString())
+                                .replace("%2\$d", res.pulled.toString())
+                                .replace("%3\$d", res.remaining.toString())
+                        },
+                        modifier = Modifier.testTag("start_pull_btn")
+                    ) { Text(stringResource(R.string.start_pull_btn)) }
+                    extractMsg?.let { msg ->
+                        Text(
+                            msg.removePrefix("!"),
+                            color = if (msg.startsWith("!")) Color(0xFFFFC107) else GREEN_OK,
+                            fontSize = 15.sp,
+                            modifier = Modifier.testTag("extract_report")
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.evidence_note),
+                        fontSize = 12.sp,
+                        modifier = Modifier.testTag("evidence_note")
+                    )
                 }
             }
 
