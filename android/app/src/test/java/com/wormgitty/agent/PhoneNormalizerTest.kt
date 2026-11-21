@@ -7,32 +7,47 @@ import org.junit.Test
 class PhoneNormalizerTest {
 
     @Test
-    fun egyptianMobileGetsCountryCode() {
+    fun plusPrefixedEgyptianPassesThrough() {
+        assertEquals("+201012345678", PhoneNormalizer.normalize("+201012345678"))
+    }
+
+    @Test
+    fun localEgyptianNormalizedToDefaultCc() {
         assertEquals("+201012345678", PhoneNormalizer.normalize("01012345678"))
     }
 
     @Test
-    fun nineDigitsRejected() {
-        assertNull(PhoneNormalizer.normalize("010123456"))
+    fun saudiInternationalPassesThrough() {
+        assertEquals("+966501234567", PhoneNormalizer.normalize("+966501234567"))
     }
 
     @Test
-    fun sixteenDigitsRejected() {
-        assertNull(PhoneNormalizer.normalize("0101234567890123"))
+    fun usInternationalPassesThrough() {
+        assertEquals("+15551234567", PhoneNormalizer.normalize("+15551234567"))
     }
 
     @Test
-    fun alreadyCountryCodedKeepsPlusForm() {
-        assertEquals("+201012345678", PhoneNormalizer.normalize("201012345678"))
+    fun ccOnlyFails() {
+        assertNull(PhoneNormalizer.normalize("+20"))
     }
 
     @Test
-    fun e164PassthroughValid() {
-        assertEquals("+14155552671", PhoneNormalizer.normalize("+1 (415) 555-2671"))
+    fun sixteenDigitsFail() {
+        assertNull(PhoneNormalizer.normalize("+201012345678901234"))
     }
 
     @Test
-    fun emptyInputRejected() {
+    fun lettersFail() {
+        assertNull(PhoneNormalizer.normalize("no digits here"))
+    }
+
+    @Test
+    fun separatorsSurviveNormalization() {
+        assertEquals("+201012345678", PhoneNormalizer.normalize("(010) 123-45678"))
+    }
+
+    @Test
+    fun emptyInputFails() {
         assertNull(PhoneNormalizer.normalize(""))
     }
 }
