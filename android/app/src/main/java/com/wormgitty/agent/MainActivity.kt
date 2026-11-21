@@ -1,4 +1,4 @@
-﻿package com.wormgitty.agent
+package com.wormgitty.agent
 
 import android.content.ComponentName
 import android.content.Context
@@ -270,7 +270,11 @@ fun WizardScreen(
                         Spacer(Modifier.width(12.dp))
                         Text(stringResource(key.titleRes), Modifier.weight(1f))
                         TextButton(onClick = { opener.open(activity, key) }) {
-                            Text(if (ok) "âœ”" else "ÙØªØ­ Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª")
+                            Text(
+                                stringResource(
+                                    if (ok) R.string.row_done_glyph else R.string.row_open_settings
+                                )
+                            )
                         }
                     }
                 }

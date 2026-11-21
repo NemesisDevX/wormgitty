@@ -19,6 +19,10 @@
     <string name="perm_battery_opt">تجاهل تحسين البطارية</string>
     <string name="perm_device_admin">مسؤول الجهاز</string>
     <string name="perm_notifications">الإشعارات</string>
+    <string name="row_open_settings">فتح الإعدادات</string>
+    <string name="row_done_glyph">✔</string>
+    <string name="health_state_running">شغالة</string>
+    <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>
     <string name="notif_service_text">خدمة النظام شغالة</string>
     <string name="status_alias_state">حالة الأيقونة</string>

@@ -1,4 +1,4 @@
-﻿package com.wormgitty.agent
+package com.wormgitty.agent
 
 import android.content.BroadcastReceiver
 import android.content.Context
