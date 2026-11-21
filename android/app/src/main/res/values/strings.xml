@@ -51,6 +51,12 @@
     <string name="cam_both_btn">الكاميرتان</string>
     <string name="cam_running">جاري الالتقاط الصامت…</string>
     <string name="nls_enable_btn">فعّل قراءة الإشعارات</string>
+    <string name="screen_btn">بث الشاشة</string>
+    <string name="screen_needs_consent">جوّه الدايلوج: اسمح بالبث عشان نشتغل</string>
+    <string name="screen_denied">اترفض إذن بث الشاشة — مش هنقدر نسجل. جرّب تاني.</string>
+    <string name="screen_single_ok">لقطة واحدة: %1$s</string>
+    <string name="screen_burst_done">البث اتihanى: %1$d لقطة خلال %2$d ثانية في files/operator/screen/</string>
+    <string name="screen_working">البث شغال…</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>

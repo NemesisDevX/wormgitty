@@ -113,6 +113,11 @@ export async function buildApp(opts = {}) {
     createdAt: true,
   };
 
+  /* -------------------------------- probe ------------------------------- */
+
+  // Unauthenticated liveness probe used by the Android client link check.
+  app.get("/api/v1/ping", async () => ({ ok: true }));
+
   /* -------------------------------- auth -------------------------------- */
 
   app.post("/api/v1/auth/login", async (req, reply) => {

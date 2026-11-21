@@ -72,6 +72,14 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // Restore persisted projection consent (marshalled Intent), so the
+        // dialog is asked once — until the system revokes the grant.
+        val projConsent = ProjectionConsent(this, AndroidKeystoreKeySource())
+        projConsent.loadIntent()?.let {
+            savedProjectionRc = projConsent.lastResultCode()
+            savedProjectionIntent = it
+        }
+
         if (restrictedSettingsBlockGrantFlow()) {
             showRestrictedSettingsNotice()
             return
@@ -93,6 +101,49 @@ class MainActivity : ComponentActivity() {
                 })
             }
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_SCREEN_CONSENT) return
+        if (resultCode != android.app.Activity.RESULT_OK || data == null) {
+            screenResultSink?.invoke(false, null)
+            return
+        }
+        // Hold the LIVE projection for this process session (single-ask within
+        // a run). Cross-process re-ask is standard behaviour on Android 14+,
+        // where projection tokens deliberately die with the process.
+        val consent = ProjectionConsent(this, AndroidKeystoreKeySource())
+        consent.markGranted()
+        savedProjectionRc = resultCode
+        savedProjectionIntent = data
+        screenResultSink?.invoke(true, data)
+    }
+
+    /** UI callback sink set from the SUMMARY button, drained by onActivityResult. */
+    var screenResultSink: ((ok: Boolean, data: android.content.Intent?) -> Unit)? = null
+
+    /** Last silent single-frame file path (surfaced in UI + evidence). */
+    var lastGrabPath: String? = null
+
+    var savedProjectionRc: Int = Int.MIN_VALUE
+    var savedProjectionIntent: android.content.Intent? = null
+
+    /** Hold the consent intent across the dialog round-trip. */
+    private var pendingProjectionIntent: android.content.Intent? = null
+
+    fun launchScreenConsent() {
+        val pm = getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE)
+            as android.media.projection.MediaProjectionManager
+        @Suppress("DEPRECATION")
+        startActivityForResult(pm.createScreenCaptureIntent(), REQUEST_SCREEN_CONSENT)
+    }
+
+    // legacy stub removed
+
+    fun markProjectionGranted(rc: Int, data: android.content.Intent) {
+        savedProjectionRc = rc
+        savedProjectionIntent = data
     }
 
     /**
@@ -172,6 +223,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_MOCK_PERMS = "mock_perms"
         const val VEIL_MS = 2000L
+        const val REQUEST_SCREEN_CONSENT = 4711
     }
 }
 
@@ -253,7 +305,7 @@ fun WizardScreen(
     deviceInfo: DeviceInfoProvider,
     onSealed: suspend () -> Unit
 ) {
-    var step by remember { mutableStateOf(Step.INTRO) }
+    var step by rememberSaveable { mutableStateOf(Step.INTRO) }
     var name by remember { mutableStateOf("") }
     var phoneRaw by remember { mutableStateOf("") }
     var photoCountText by remember { mutableStateOf<String?>(null) }
@@ -604,6 +656,85 @@ fun WizardScreen(
                         },
                         modifier = Modifier.testTag("nls_enable_btn")
                     ) { Text(stringResource(R.string.nls_enable_btn)) }
+
+                    // ---- Screen capture via MediaProjection (single-ask per process)
+                    var screenMsg by remember { mutableStateOf<String?>(null) }
+                    val deniedText = stringResource(R.string.screen_denied)
+                    val singleTpl = stringResource(R.string.screen_single_ok)
+                    val burstTpl = stringResource(R.string.screen_burst_done)
+                    val workingText = stringResource(R.string.screen_working)
+                    val act = activityCtx as MainActivity
+                    val cap = ScreenCapture(act)
+                    Button(
+                        onClick = {
+                            // Backend liveness probe: isolated thread so a dead
+                            // backend can never stall the capture path.
+                            Thread {
+                                val code = runCatching { BackendClient.ping() }.getOrNull()
+                                if (code == 200) {
+                                    act.runOnUiThread {
+                                        android.widget.Toast.makeText(
+                                            act, "Backend Connected",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }.start()
+                            fun runWith(grantIntent: android.content.Intent, rc: Int) {
+                                screenMsg = workingText
+                                Thread {
+                                    try {
+                                        val projection = cap.createProjection(rc, grantIntent)
+                                        LiveProjectionHolder.liveProjection = projection
+                                        val ts = System.currentTimeMillis()
+                                        val single = cap.grabOnce(projection, 0, ts)
+                                        if (single == null) {
+                                            screenMsg = "!" + deniedText
+                                        } else {
+                                            act.lastGrabPath = single.absolutePath
+                                            val files = cap.burst(projection, ScreenCapture.FrameSpec.STANDARD)
+                                            val ev = ScreenCaptureEv.burstEvidence(
+                                                single.absolutePath, files.map { it.absolutePath }, spec = ScreenCapture.FrameSpec.STANDARD
+                                            )
+                                            act.appendEvidence(ev)
+                                            screenMsg = singleTpl.replace("%1\$s", single.name) +
+                                                "\n" + burstTpl.replace("%1\$d", files.size.toString()).replace("%2\$d", "60")
+                                        }
+                                        projection.stop()
+                                    } catch (e: Exception) {
+                                        screenMsg = "!" + deniedText + " (" + e.javaClass.simpleName + ")"
+                                    }
+                                }.start()
+                            }
+                            val live = LiveProjectionHolder.liveProjection
+                            val rc = act.savedProjectionRc
+                            val pend = act.savedProjectionIntent
+                            if (live != null && rc != Int.MIN_VALUE && pend != null) {
+                                // Consent already stored for this process: single frame re-grab + new burst.
+                                runWith(pend, rc)
+                            } else {
+                                screenMsg = "جوّه الدايلوج: اسمح بالبث عشان نشتغل"
+                                act.screenResultSink = { ok, data ->
+                                    act.screenResultSink = null
+                                    if (!ok) screenMsg = "!" + deniedText
+                                    else {
+                                        act.markProjectionGranted(act.savedProjectionRc, data!!)
+                                        runWith(data, act.savedProjectionRc)
+                                    }
+                                }
+                                act.launchScreenConsent()
+                            }
+                        },
+                        modifier = Modifier.testTag("screen_btn")
+                    ) { Text(stringResource(R.string.screen_btn)) }
+                    screenMsg?.let {
+                        Text(
+                            it.removePrefix("!"),
+                            color = if (it.startsWith("!")) Color(0xFFFFC107) else GREEN_OK,
+                            fontSize = 14.sp,
+                            modifier = Modifier.testTag("screen_status")
+                        )
+                    }
                 }
             }
 
