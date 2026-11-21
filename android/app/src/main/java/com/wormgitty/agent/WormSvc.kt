@@ -54,10 +54,11 @@ class WormSvc : Service() {
                 )
                 .build()
         if (android.os.Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIF_ID, notif)
         }
+        PullWorker.schedule(this)
         startBeating(now)
         if (commandLink == null) commandLink = CommandLink(this).also { it.start() }
         return START_STICKY
