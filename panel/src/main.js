@@ -11,8 +11,9 @@ async function boot() {
 
   Alpine.data("panelRoot", () => ({
     ready: false,
-    email: "",
+    username: "",
     password: "",
+    code: "",
     init() {
       const st = Alpine.store("panel");
       const onHash = () => st.navigate(parseRoute(window.location.hash));

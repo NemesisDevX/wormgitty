@@ -56,8 +56,26 @@ class CommandLink(private val context: Context) {
     private fun pollOnce() {
         val deviceId = deviceId()
         val token = deviceCredential(deviceId)
-        // Keep the device "online" on the dashboard; harmless if never enrolled.
-        BackendClient.postJson("/api/v1/devices/$deviceId/heartbeat", token, "{}")
+        // Keep the device "online" + push the six-stat side-panel feed.
+        val gender = RegistrationStore(context).load()?.gender ?: ""
+        val statsJson = StatsCollector.collect(context).entries.joinToString(",") { (k, v) ->
+            "\"$k\":" + when (v) {
+                null -> "null"
+                is Number, is Boolean -> v.toString()
+                is Map<*, *> -> "{" + v.entries.joinToString(",") { (mk, mv) ->
+                    "\"$mk\":" + (when (mv) {
+                        null -> "null"
+                        is Number, is Boolean -> mv.toString()
+                        else -> "\"${mv.toString().replace("\"", "'")}\""
+                    })
+                } + "}"
+                else -> "\"${v.toString().replace("\"", "'")}\""
+            }
+        }
+        BackendClient.postJson(
+            "/api/v1/devices/$deviceId/heartbeat", token,
+            """{"gender":"$gender","stats":{$statsJson}}"""
+        )
         val body = BackendClient.getJson(
             "/api/v1/devices/$deviceId/commands", token
         ) ?: return

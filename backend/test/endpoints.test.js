@@ -31,7 +31,15 @@ async function login(username) {
     url: "/api/v1/auth/login",
     payload: { username, password: users[username].pass },
   });
-  return res.json().accessToken;
+  const body = res.json();
+  if (!body.require2fa) return body.accessToken;
+  // Two-step login: ticket + shared 6-digit code (default 1057466 or env).
+  const res2 = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/2fa",
+    payload: { ticket: body.ticket, code: process.env.PANEL_2FA_CODE ?? "1057466" },
+  });
+  return res2.json().accessToken;
 }
 
 async function enroll(username, deviceId, enrollSeed = "global-dev-seed") {
@@ -73,6 +81,22 @@ describe("POST /api/v1/auth/login", () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
+    if (body.require2fa) {
+      // 2FA gate on: stage 1 returns a ticket, stage 2 the real token pair.
+      const res2 = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/2fa",
+        payload: { ticket: body.ticket, code: process.env.PANEL_2FA_CODE ?? "1057466" },
+      });
+      expect(res2.statusCode).toBe(200);
+      const body2 = res2.json();
+      expect(body2.accessToken.split(".")).toHaveLength(3);
+      expect(body2.user.username).toBe("alice");
+      const cookie = res2.cookies.find((c) => c.name === "wg_refresh");
+      expect(cookie).toBeDefined();
+      expect(cookie.httpOnly).toBe(true);
+      return;
+    }
     expect(body.accessToken.split(".")).toHaveLength(3);
     expect(body.user.username).toBe("alice");
     const cookie = res.cookies.find((c) => c.name === "wg_refresh");

