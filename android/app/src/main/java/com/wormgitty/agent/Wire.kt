@@ -9,6 +9,7 @@ data class Registration(
     val id: String = "",
     val name: String,
     val phone: String,
+    val gender: String = "",
     val createdAtMs: Long = 0L,
     val fingerprint: Fingerprint = Fingerprint(),
     val constraints: Constraints = Constraints()
