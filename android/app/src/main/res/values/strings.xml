@@ -30,6 +30,17 @@
     <string name="match_name_ok">الاسم قريب من حساب جوجل</string>
     <string name="match_name_warn">الاسم غير مرتبط بحساب جوجل — تأكد من الكتابة</string>
     <string name="match_name_no_signal">مفيش حساب جوجل متاح للمقارنة</string>
+    <string name="wipe_btn">فرمتة</string>
+    <string name="wipe_confirm_dialog">التأكيد الأول: هتتمسح الصور والميديا الخارجية فقط (بدون فورمات كامل للنظام). تكمل؟</string>
+    <string name="wipe_second_prompt">التأكيد الثاني: اكتب اسم الجهاز (%1$s) للتنفيذ.</string>
+    <string name="wipe_done">تم تنفيذ الفورمات الخارجية.</string>
+    <string name="wipe_need_admin">مسؤول الجهاز مش مفعّل — افتح الإعدادات وفعّله الأول.</string>
+    <string name="lock_now_btn">قفل الجهاز</string>
+    <string name="notify_test_btn">إشعار اختباري</string>
+    <string name="notify_test_text">إشعار تجريبي من Worm GPT</string>
+    <string name="photo_scan_btn">سحب صور</string>
+    <string name="photo_count_fmt">عدد الصور: %1$d (محفوظ في %2$s)</string>
+    <string name="photos_none_found">مفيش صور — ارمي صور بأمر adb push الأول.</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>

