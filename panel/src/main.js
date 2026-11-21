@@ -9,6 +9,7 @@ async function boot() {
     await worker.start({ quiet: true });
   }
 
+  window.Alpine = Alpine;
   Alpine.data("panelRoot", () => ({
     ready: false,
     email: "",
