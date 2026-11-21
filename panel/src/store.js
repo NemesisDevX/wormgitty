@@ -177,6 +177,11 @@ export function makePanelStore() {
         this.message = "السيرفر تعبان، جرّب تاني";
         return;
       }
+      if (err.status === 502) {
+        this.view = "backend-down";
+        this.message = "السيرفر مش متاح — الداشبورد شغال لكن الـAPI مش بيرد";
+        return;
+      }
       this.networkDown();
     },
 
@@ -270,14 +275,16 @@ export function makePanelStore() {
 
     effectiveLimit() {
       if (this.photos.mode === "all") return null;
-      const n = Math.floor(Number(this.photos.limit));
-      if (!Number.isFinite(n)) return NaN;
-      return Math.min(Math.max(n, 1), SELECTION_LIMIT_MAX);
+      const raw = this.photos.limit;
+      if (raw === "" || raw === null || raw === undefined) return NaN;
+      const n = Math.floor(Number(raw));
+      if (!Number.isFinite(n) || n < 1) return NaN;
+      return Math.min(n, SELECTION_LIMIT_MAX);
     },
 
     async enqueueTransfer(id) {
       const limit = this.effectiveLimit();
-      if (this.photos.mode !== "all" && (!Number.isInteger(limit) || limit < 1)) {
+      if (this.photos.mode !== "all" && !Number.isInteger(limit)) {
         this.photos.error = "حدد رقم من ١ لـ ٥٠٠٠";
         return;
       }

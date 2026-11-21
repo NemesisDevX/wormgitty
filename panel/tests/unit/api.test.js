@@ -82,6 +82,15 @@ describe("apiFetch transport", () => {
     expect(caught.status).toBe(0);
   });
 
+  it("html response from the dev server raises 502 instead of an empty list", async () => {
+    const fetchImpl = async () => ({
+      ok: true, status: 200,
+      headers: { get: () => "text/html; charset=utf-8" },
+      json: async () => { throw new Error("not json"); },
+    });
+    await expect(apiFetch("/devices", {}, 0, fetchImpl)).rejects.toMatchObject({ status: 502 });
+  });
+
   it("login stores tokens on success", async () => {
     server.use(
       http.post(`${BASE}/auth/login`, () =>

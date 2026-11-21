@@ -51,6 +51,11 @@
       <button data-testid="devices-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
     </section>
 
+    <section class="state-block" data-testid="devices-backend-down" x-show="$store.panel.view === 'backend-down'">
+      <span x-text="$store.panel.message"></span>
+      <button data-testid="devices-backend-retry" @click="$store.panel.reload()">إعادة المحاولة</button>
+    </section>
+
     <table data-testid="devices-table" x-show="$store.panel.view === 'ready'" class="card">
       <thead>
         <tr><th>الاسم</th><th>الموبايل</th><th>الموديل</th><th>Sdk</th><th>الحالة</th><th>آخر ظهور</th></tr>

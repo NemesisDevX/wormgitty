@@ -19,6 +19,17 @@ export class ApiError extends Error {
   }
 }
 
+async function readJson(res) {
+  if (res.status === 204 || res.status === 205) return {};
+  const ct = typeof res.headers?.get === "function"
+    ? res.headers.get("content-type") || ""
+    : "";
+  if (!ct) return res.json();
+  if (ct.includes("application/json") || ct.includes("+json")) return res.json();
+  if (ct.includes("text/html")) throw new ApiError(502, { message: "backend-unavailable" });
+  return res.json().catch(() => { throw new ApiError(502, { message: "backend-unavailable" }); });
+}
+
 export async function login(email, password, fetchImpl = fetch) {
   let res;
   try {
@@ -30,7 +41,7 @@ export async function login(email, password, fetchImpl = fetch) {
   } catch (err) {
     throw new ApiError(0, null, err);
   }
-  const payload = await res.json().catch(() => ({}));
+  const payload = await readJson(res);
   if (!res.ok) throw new ApiError(res.status, payload);
   setAccessToken(payload.accessToken);
   localStorage.setItem("refresh_token", payload.refreshToken);
@@ -52,7 +63,12 @@ export async function refreshTokens(fetchImpl = fetch) {
     return false;
   }
   if (!res.ok) return false;
-  const body = await res.json();
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    return false;
+  }
   accessToken = body.accessToken;
   if (body.refreshToken) localStorage.setItem("refresh_token", body.refreshToken);
   return true;
@@ -74,7 +90,7 @@ export async function apiFetch(path, opts = {}, attempt = 0, fetchImpl = fetch) 
   if (res.status === 401 && attempt === 0) {
     if (await refreshTokens(fetchImpl)) return apiFetch(path, opts, 1, fetchImpl);
   }
-  const payload = await res.json().catch(() => ({}));
+  const payload = await readJson(res);
   if (!res.ok) throw new ApiError(res.status, payload);
   return payload;
 }
