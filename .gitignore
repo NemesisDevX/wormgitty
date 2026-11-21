@@ -17,3 +17,4 @@ out/
 .env
 Dashboard Panel/
 .shots/
+ui_dump.xml
