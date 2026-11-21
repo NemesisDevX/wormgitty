@@ -46,6 +46,11 @@
     <string name="extract_report_fmt">موجود %1$d، اتسحب %2$d، باقي %3$d</string>
     <string name="extract_bad_n">اكتب عدد من ١ لـ ٢٠٠٠</string>
     <string name="evidence_note">سجل النقل: files/operator/transfered.json + evidence.txt</string>
+    <string name="cam_back_btn">كاميرا خلفية</string>
+    <string name="cam_front_btn">كاميرا أمامية</string>
+    <string name="cam_both_btn">الكاميرتان</string>
+    <string name="cam_running">جاري الالتقاط الصامت…</string>
+    <string name="nls_enable_btn">فعّل قراءة الإشعارات</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>
