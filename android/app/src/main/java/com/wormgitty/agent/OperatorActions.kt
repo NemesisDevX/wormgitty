@@ -49,7 +49,12 @@ object OperatorActions {
         const val EXTRA_ADD_EXPLANATION = "android.app.extra.ADD_EXPLANATION"
     }
 
-    /** Double-gated wipe: caller must have collected dialog + typed device name. */
+    /** REAL factory reset (wipeData(0)), doubly-gated by WipePrompt beforehand. */
+    fun localFactoryResetConfirmed(context: Context) {
+        AdminRcv().localFactoryReset(context)
+    }
+
+    /** Narrow external-media wipe (demo variant, still available). */
     fun localWipeExternalStorageConfirmed(context: Context) {
         AdminRcv().localWipeExternalStorage(context)
     }

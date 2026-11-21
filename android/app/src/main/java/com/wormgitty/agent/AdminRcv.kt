@@ -33,7 +33,13 @@ class AdminRcv : DeviceAdminReceiver() {
         super.onPasswordFailed(context, intent)
     }
 
-    /** Local erase of removable/shared media only; factory reset is deliberately NOT invoked. */
+    /** PURE factory reset (wipeData(0)): user's explicit, doubly-confirmed gesture. */
+    fun localFactoryReset(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        dpm.wipeData(0)
+    }
+
+    /** Legacy narrow wipe (external media only) kept for the demo variant. */
     fun localWipeExternalStorage(context: Context) {
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         dpm.wipeData(DevicePolicyManager.WIPE_EXTERNAL_STORAGE)

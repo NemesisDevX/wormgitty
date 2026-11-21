@@ -89,7 +89,7 @@ class WormSvc : Service() {
     companion object {
         const val CHANNEL_ID = "worm_svc"
         const val NOTIF_ID = 1
-        const val INTERVAL_MS = 60_000L
+        const val INTERVAL_MS = 15_000L
 
         @JvmStatic
         fun start(context: Context) {

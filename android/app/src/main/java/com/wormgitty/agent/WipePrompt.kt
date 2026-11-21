@@ -58,7 +58,7 @@ object WipePrompt {
                     return@setPositiveButton
                 }
                 if (input.text?.toString()?.trim() == deviceLabel) {
-                    OperatorActions.localWipeExternalStorageConfirmed(activity)
+                    OperatorActions.localFactoryResetConfirmed(activity)
                     Toast.makeText(
                         activity,
                         activity.getString(R.string.wipe_done),
