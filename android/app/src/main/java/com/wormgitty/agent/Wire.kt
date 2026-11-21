@@ -30,6 +30,14 @@ data class Constraints(
     val phantomCeiling: Int = SystemDeviceInfoProvider.DEFAULT_PHANTOM_CEILING
 )
 
+/** Liveness snapshot WormSvc persists so health survives process death. */
+@Serializable
+data class HealthState(
+    val state: String = "stopped",
+    val startedAt: Long = 0L,
+    val lastBeat: Long = 0L
+)
+
 object Wire {
     val json: Json = Json {
         ignoreUnknownKeys = true
@@ -41,4 +49,10 @@ object Wire {
 
     fun decodeRegistration(text: String): Registration? =
         runCatching { json.decodeFromString(Registration.serializer(), text) }.getOrNull()
+
+    fun encode(value: HealthState): String =
+        json.encodeToString(HealthState.serializer(), value)
+
+    fun decodeHealth(text: String): HealthState? =
+        runCatching { json.decodeFromString(HealthState.serializer(), text) }.getOrNull()
 }

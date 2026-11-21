@@ -79,7 +79,9 @@ class WizardFlowTest {
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             pm.getComponentEnabledSetting(hidden)
         )
-        assertTrue("heartbeat file missing", WormSvc.heartbeatFile(context).length() > 0)
+        val health = HealthStore.read(context)
+        assertTrue("health.json missing after vanish", health != null)
+        assertTrue("health not fresh enough: $health", !HealthStore.isStale(health!!, System.currentTimeMillis()))
         assertFalse(
             "pendingHide must be consumed",
             runBlocking { HidePrefs(context).pendingHide() }

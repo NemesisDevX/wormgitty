@@ -1,6 +1,5 @@
 package com.wormgitty.agent
 
-import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -10,7 +9,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 
-/** Read-only diagnostics: alias state, service liveness, last heartbeat, registered phone. */
+/**
+ * Read-only diagnostics: alias state, service health from disk only,
+ * last heartbeat, registered phone. In-process flags are never trusted here.
+ */
 class StatusActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,12 +55,19 @@ class StatusActivity : ComponentActivity() {
 
             else -> "?"
         }
-        val beatAge = System.currentTimeMillis() - ServiceAlive.lastBeatMs
+        val now = System.currentTimeMillis()
+        val health = HealthStore.read(this)
+        val healthValue = when {
+            health == null -> "-"
+            HealthStore.isStale(health, now) -> getString(R.string.health_state_stale)
+            else -> getString(R.string.health_state_running)
+        }
+        val beatAge = health?.let { (now - it.lastBeat) / 1000 }
         return listOf(
             getString(R.string.status_alias_state) to alias,
-            getString(R.string.status_service_alive) to ServiceAlive.started.toString(),
+            getString(R.string.status_service_alive) to healthValue,
             getString(R.string.status_last_heartbeat) to
-                (if (ServiceAlive.lastBeatMs == 0L) "-" else "${beatAge / 1000}s"),
+                (beatAge?.let { "${it}s" } ?: "-"),
             getString(R.string.status_phone) to (RegistrationStore(this).load()?.phone ?: "-")
         )
     }

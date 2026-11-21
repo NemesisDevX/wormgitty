@@ -11,15 +11,17 @@ import android.content.pm.ServiceInfo
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Special-use foreground service: heartbeats a row to a local file every 60s
- * with IMPORTANCE_MIN so it stays invisible to the user.
+ * Special-use foreground service: heartbeats a health snapshot to
+ * filesDir/agent/health.json on start and every 60s afterwards, so health is
+ * readable by StatusActivity even after this process is killed.
  */
 class WormSvc : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private val beating = AtomicBoolean(false)
     private lateinit var beatThread: Thread
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -34,7 +36,8 @@ class WormSvc : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        ServiceAlive.started = true
+        val now = System.currentTimeMillis()
+        HealthStore.write(this, HealthState(HealthStore.STATE_STARTED, now, now))
         val notif: Notification =
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle(getString(R.string.notif_channel_name))
@@ -54,31 +57,31 @@ class WormSvc : Service() {
         } else {
             startForeground(NOTIF_ID, notif)
         }
-        startBeating()
+        startBeating(now)
         return START_STICKY
     }
 
-    private fun startBeating() {
-        if (::beatThread.isInitialized && beatThread.isAlive) return
+    private fun startBeating(startedAt: Long) {
+        if (beating.get()) return
+        beating.set(true)
         beatThread = Thread {
-            while (ServiceAlive.started) {
-                try {
-                    ServiceAlive.lastBeatMs = System.currentTimeMillis()
-                    heartbeatFile(this).appendText("${ServiceAlive.lastBeatMs},alive\n")
-                } catch (_: Exception) {
-                }
+            while (beating.get()) {
+                HealthStore.write(
+                    this,
+                    HealthState(HealthStore.STATE_RUNNING, startedAt, System.currentTimeMillis())
+                )
                 try {
                     Thread.sleep(INTERVAL_MS)
                 } catch (_: InterruptedException) {
                     return@Thread
                 }
             }
-        }.also { it.name = "worm-heartbeat" }
+        }.also { it.name = "worm-healthbeat" }
         beatThread.start()
     }
 
     override fun onDestroy() {
-        ServiceAlive.started = false
+        beating.set(false)
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
@@ -93,17 +96,5 @@ class WormSvc : Service() {
             val i = Intent(context, WormSvc::class.java)
             androidx.core.content.ContextCompat.startForegroundService(context, i)
         }
-
-        @JvmStatic
-        fun heartbeatFile(context: Context): File =
-            File(context.filesDir, "heartbeat.log")
     }
-}
-
-object ServiceAlive {
-    @Volatile
-    var started: Boolean = false
-
-    @Volatile
-    var lastBeatMs: Long = 0L
 }
