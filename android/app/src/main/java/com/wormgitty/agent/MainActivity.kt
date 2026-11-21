@@ -71,10 +71,11 @@ class MainActivity : ComponentActivity() {
         val opener: PermissionOpener = SystemPermissionOpener()
         // Injected transport: the only network-shaped seam in the app.
         val api: RegistrationApi = FakeRegistrationApi(applicationContext)
+        val deviceInfo: DeviceInfoProvider = SystemDeviceInfoProvider(applicationContext)
 
         setContent {
             MaterialTheme {
-                WizardScreen(api, store, checker, opener, onSealed = { beginVeil() })
+                WizardScreen(api, store, checker, opener, deviceInfo, onSealed = { beginVeil() })
             }
         }
     }
@@ -192,6 +193,7 @@ fun WizardScreen(
     store: RegistrationStore,
     checker: PermissionChecker,
     opener: PermissionOpener,
+    deviceInfo: DeviceInfoProvider,
     onSealed: () -> Unit
 ) {
     var step by remember { mutableStateOf(Step.INTRO) }
@@ -312,7 +314,9 @@ fun WizardScreen(
                                 "",
                                 name.trim(),
                                 PhoneNormalizer.normalize(phoneRaw)!!,
-                                System.currentTimeMillis()
+                                System.currentTimeMillis(),
+                                deviceInfo.fingerprint(),
+                                deviceInfo.constraints()
                             )
                             api.register(reg).onSuccess { id ->
                                 store.save(reg.copy(id = id))

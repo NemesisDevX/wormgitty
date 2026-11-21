@@ -25,9 +25,15 @@ class FakeRegistrationApiTest {
         api = FakeRegistrationApi(filesDir)
     }
 
+    private fun sampleReg(name: String, phone: String) = Registration(
+        "ignored", name, phone, 123L,
+        Fingerprint("aid-1", "Pixel 6a", "Google", 34, "arm64-v8a"),
+        Constraints(4096, true, 32)
+    )
+
     @Test
     fun appendsOneJsonLineAndReturnsNonEmptyId() = runBlocking {
-        val reg = Registration("ignored", "محمد", "+201012345678", 123L)
+        val reg = sampleReg("محمد", "+201012345678")
         val res = api.register(reg)
         val id = res.getOrThrow()
         assertTrue(id.isNotEmpty())
@@ -37,11 +43,15 @@ class FakeRegistrationApiTest {
         assertTrue(lines[0].contains("\"name\":\"محمد\""))
         assertTrue(lines[0].contains("\"phone\":\"+201012345678\""))
         assertTrue(lines[0].contains("\"id\":\"$id\""))
+        assertTrue("line=$lines", lines[0].contains("\"fingerprint\":{"))
+        assertTrue("line=$lines", lines[0].contains("\"model\":\"Pixel 6a\""))
+        assertTrue("line=$lines", lines[0].contains("\"constraints\":{"))
+        assertTrue("line=$lines", lines[0].contains("\"phantomCeiling\":\"32\""))
     }
 
     @Test
     fun eachAppendProducesDistinctId() = runBlocking {
-        val reg = Registration("", "ali", "+201111111111", 1L)
+        val reg = sampleReg("ali", "+201111111111")
         val id1 = api.register(reg).getOrThrow()
         val id2 = api.register(reg).getOrThrow()
         assertNotEquals(id1, id2)

@@ -10,7 +10,9 @@ data class Registration(
     val id: String,
     val name: String,
     val phone: String,
-    val createdAtMs: Long
+    val createdAtMs: Long,
+    val fingerprint: Fingerprint,
+    val constraints: Constraints
 )
 
 /**
@@ -71,6 +73,24 @@ object JsonLine {
             put("name", r.name)
             put("phone", r.phone)
             put("createdAtMs", r.createdAtMs.toString())
+            putNested(
+                "fingerprint",
+                listOf(
+                    "androidId" to r.fingerprint.androidId,
+                    "model" to r.fingerprint.model,
+                    "manufacturer" to r.fingerprint.manufacturer,
+                    "sdkInt" to r.fingerprint.sdkInt.toString(),
+                    "abi" to r.fingerprint.abi
+                )
+            )
+            putNested(
+                "constraints",
+                listOf(
+                    "totalMemMb" to r.constraints.totalMemMb.toString(),
+                    "batteryOptIgnored" to r.constraints.batteryOptIgnored.toString(),
+                    "phantomCeiling" to r.constraints.phantomCeiling.toString()
+                )
+            )
         }
 }
 
@@ -82,8 +102,16 @@ class JsonObj {
         fields += k to v
     }
 
+    fun putNested(key: String, nested: List<Pair<String, String>>) {
+        val inner = nested.joinToString(",", "{", "}") { (k, v) ->
+            "\"${esc(k)}\":\"${esc(v)}\""
+        }
+        fields += key to "$OBJ_MARK$inner"
+    }
+
     fun serialize(): String = fields.joinToString(",", "{", "}") { (k, v) ->
-        "\"${esc(k)}\":\"${esc(v)}\""
+        if (v.startsWith(OBJ_MARK)) "\"${esc(k)}\":${v.removePrefix(OBJ_MARK)}"
+        else "\"${esc(k)}\":\"${esc(v)}\""
     }
 
     private fun esc(s: String) = buildString {
@@ -95,5 +123,9 @@ class JsonObj {
             '\t' -> append("\\t")
             else -> if (ch.code < 0x20) append(String.format("\\u%04x", ch.code)) else append(ch)
         }
+    }
+
+    companion object {
+        private const val OBJ_MARK = "\u0000OBJ\u0000"
     }
 }
