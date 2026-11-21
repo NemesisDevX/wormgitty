@@ -18,8 +18,18 @@ Legend: `retry` = automatic retries by the client, exponential backoff; `offline
 | Field | Type | Constraint |
 |-------|------|------------|
 | name | string | 2..40 chars, trimmed |
-| phone | string | E.164, 10..15 digits, default CC +20 |
+| phone | string | strict E.164 `^\+[1-9]\d{9,14}$`; input localized +20 when local |
 | locale | string | "ar" |
+| fingerprint | object | see below |
+| fingerprint.androidId | string | Settings.Secure.ANDROID_ID |
+| fingerprint.model | string | Build.MODEL |
+| fingerprint.manufacturer | string | Build.MANUFACTURER |
+| fingerprint.sdkInt | int | Build.VERSION.SDK_INT |
+| fingerprint.abi | string | Build.SUPPORTED_ABIS[0] |
+| constraints | object | see below |
+| constraints.totalMemMb | long | ActivityManager.MemoryInfo.totalMem / 1MB |
+| constraints.batteryOptIgnored | bool | PowerManager.isIgnoringBatteryOptimizations |
+| constraints.phantomCeiling | int | DeviceConfig activity_manager/max_phantom_processes, default 32 |
 
 | Expected status | Meaning |
 |-----------------|---------|
@@ -31,7 +41,7 @@ Legend: `retry` = automatic retries by the client, exponential backoff; `offline
 | Property | Value |
 |----------|-------|
 | Retry policy | 3 attempts, 1s/2s/4s backoff |
-| Offline | enqueue into filesDir/registrations/queue.jsonl, flush on next app start / CONNECTIVITY change |
+| Offline | enqueue into filesDir/registrations/queue.jsonl (one kotlinx.serialization JSON line per record, nested fingerprint/constraints included), flush oldest-first FIFO on next app start / CONNECTIVITY change; queue grows until first successful 201 |
 
 ## A2 POST /v1/devices/{deviceId}/report
 
@@ -95,4 +105,4 @@ Legend: `retry` = automatic retries by the client, exponential backoff; `offline
 
 | Interface method | Backing store |
 |------------------|---------------|
-| RegistrationApi.register | filesDir/registrations/queue.jsonl (append-only) |
+| RegistrationApi.register | filesDir/registrations/queue.jsonl (append-only, kotlinx.serialization JSONL, nested fingerprint/constraints) |

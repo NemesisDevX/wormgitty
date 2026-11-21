@@ -1,4 +1,4 @@
-# Worm Gitty
+# Worm GPT (repo slug wormgitty)
 
 Two deliverables, one repo, zero real networking. Everything talks to a fake transport behind an interface.
 
@@ -8,7 +8,10 @@ Two deliverables, one repo, zero real networking. Everything talks to a fake tra
 | Ops panel | `/panel` | Vite + vanilla JS + Alpine.js, MSW mocks |
 | Contracts | `/contract` | API spec the next phase implements mechanically |
 | Scripts | `/scripts` | `dev.sh`, `gate.sh` |
-| CI | `/.github/workflows/ci.yml` | android + panel jobs, artifacts on `always()` |
+
+## Gate
+
+GitHub Actions is disabled (quota exhausted). The gate is `scripts/gate.sh`, run locally.
 
 ## Hard rule
 
