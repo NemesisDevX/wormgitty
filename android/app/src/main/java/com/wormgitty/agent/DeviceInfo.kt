@@ -6,22 +6,6 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 
-/** Device identity and posture facts promised to the API by the contract. */
-
-data class Fingerprint(
-    val androidId: String,
-    val model: String,
-    val manufacturer: String,
-    val sdkInt: Int,
-    val abi: String
-)
-
-data class Constraints(
-    val totalMemMb: Long,
-    val batteryOptIgnored: Boolean,
-    val phantomCeiling: Int
-)
-
 interface DeviceInfoProvider {
     fun fingerprint(): Fingerprint
     fun constraints(): Constraints

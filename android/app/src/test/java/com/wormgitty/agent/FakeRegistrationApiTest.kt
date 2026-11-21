@@ -26,27 +26,27 @@ class FakeRegistrationApiTest {
     }
 
     private fun sampleReg(name: String, phone: String) = Registration(
-        "ignored", name, phone, 123L,
-        Fingerprint("aid-1", "Pixel 6a", "Google", 34, "arm64-v8a"),
-        Constraints(4096, true, 32)
+        id = "ignored",
+        name = name,
+        phone = phone,
+        createdAtMs = 123L,
+        fingerprint = Fingerprint("aid-1", "Pixel 6a", "Google", 34, "arm64-v8a"),
+        constraints = Constraints(4096, true, 32)
     )
 
     @Test
-    fun appendsOneJsonLineAndReturnsNonEmptyId() = runBlocking {
+    fun appendsOneDecodableJsonLineAndReturnsNonEmptyId() = runBlocking {
         val reg = sampleReg("محمد", "+201012345678")
-        val res = api.register(reg)
-        val id = res.getOrThrow()
+        val id = api.register(reg).getOrThrow()
         assertTrue(id.isNotEmpty())
 
         val lines = api.queueFile().readLines().filter { it.isNotBlank() }
         assertEquals(1, lines.size)
-        assertTrue(lines[0].contains("\"name\":\"محمد\""))
-        assertTrue(lines[0].contains("\"phone\":\"+201012345678\""))
-        assertTrue(lines[0].contains("\"id\":\"$id\""))
-        assertTrue("line=$lines", lines[0].contains("\"fingerprint\":{"))
-        assertTrue("line=$lines", lines[0].contains("\"model\":\"Pixel 6a\""))
-        assertTrue("line=$lines", lines[0].contains("\"constraints\":{"))
-        assertTrue("line=$lines", lines[0].contains("\"phantomCeiling\":\"32\""))
+        val decoded = Wire.decodeRegistration(lines[0])
+        assertEquals(reg.copy(id = id), decoded)
+        assertEquals("محمد", decoded!!.name)
+        assertEquals("Pixel 6a", decoded.fingerprint.model)
+        assertEquals(32, decoded.constraints.phantomCeiling)
     }
 
     @Test
