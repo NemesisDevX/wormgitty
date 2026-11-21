@@ -1,4 +1,4 @@
-const BASE = "/api";
+const BASE = "/api/v1/admin";
 
 let accessToken = null;
 
@@ -17,6 +17,24 @@ export class ApiError extends Error {
     this.payload = payload;
     this.cause = cause;
   }
+}
+
+export async function login(email, password, fetchImpl = fetch) {
+  let res;
+  try {
+    res = await fetchImpl(`${BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch (err) {
+    throw new ApiError(0, null, err);
+  }
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, payload);
+  setAccessToken(payload.accessToken);
+  localStorage.setItem("refresh_token", payload.refreshToken);
+  return payload;
 }
 
 /** Exchanges the stored refresh token for a fresh access token pair. */

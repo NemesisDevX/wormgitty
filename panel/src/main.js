@@ -3,8 +3,11 @@ import { parseRoute } from "./store.js";
 import "./styles.css";
 
 async function boot() {
-  const { worker } = await import("../mocks/browser.js");
-  await worker.start({ quiet: true });
+  // Production builds must never carry or start the mock worker.
+  if (import.meta.env.VITE_USE_MOCK === "true") {
+    const { worker } = await import("../mocks/browser.js");
+    await worker.start({ quiet: true });
+  }
 
   Alpine.data("panelRoot", () => ({
     ready: false,
