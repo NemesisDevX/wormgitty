@@ -274,6 +274,15 @@ fun WizardScreen(
             }
 
             Step.NAME -> {
+                // Attempt a graceful prefill from the Google account (GET_ACCOUNTS).
+                // Absence is an ordinary outcome: the user just types normally.
+                val activityCtx = LocalContext.current
+                LaunchedEffect(Unit) {
+                    if (name.isBlank()) {
+                        AccountReader.nameCandidate(AccountReader.firstGoogleEmail(activityCtx))
+                            ?.let { name = it }
+                    }
+                }
                 BotBubble(stringResource(R.string.name_hint))
                 OutlinedTextField(
                     value = name,
@@ -339,7 +348,18 @@ fun WizardScreen(
             }
 
             Step.PHONE -> {
+                val activityCtx = LocalContext.current
+                // SIM hint prefill: line1Number == null is NOT a failure state.
+                LaunchedEffect(Unit) {
+                    if (phoneRaw.isBlank()) {
+                        PhoneSource.simLineNumber(activityCtx)?.let { phoneRaw = it }
+                    }
+                }
                 val normalized = PhoneNormalizer.normalize(phoneRaw)
+                var simNumber by remember { mutableStateOf<String?>(null) }
+                var nameEmail by remember { mutableStateOf<String?>(null) }
+                var phoneCheck by remember { mutableStateOf<MatchEngine.PhoneCheck?>(null) }
+                var nameCheck by remember { mutableStateOf<MatchEngine.NameCheck?>(null) }
                 BotBubble(stringResource(R.string.phone_hint))
                 OutlinedTextField(
                     value = phoneRaw,
@@ -354,6 +374,53 @@ fun WizardScreen(
                         .fillMaxWidth()
                         .testTag("phone_input")
                 )
+                // "مطابقة": advisory cross-check against SIM + google account.
+                // Outcomes tint indicators; mismatch is YELLOW, never blocking.
+                Button(
+                    onClick = {
+                        simNumber = PhoneSource.simLineNumber(activityCtx)
+                        nameEmail = AccountReader.firstGoogleEmail(activityCtx)
+                        phoneCheck = MatchEngine.checkPhone(phoneRaw, simNumber)
+                        nameCheck = MatchEngine.checkNameAgainstEmail(name, nameEmail)
+                    },
+                    modifier = Modifier.testTag("match_btn")
+                ) { Text(stringResource(R.string.btn_match)) }
+                phoneCheck?.let { pc ->
+                    val (dot, text) = when (pc.outcome) {
+                        MatchEngine.Outcome.MATCH -> GREEN_OK to stringResource(R.string.match_phone_ok)
+                        MatchEngine.Outcome.MISMATCH ->
+                            Color(0xFFFFC107) to stringResource(R.string.match_phone_warn)
+
+                        MatchEngine.Outcome.NO_SIGNAL ->
+                            Color.Gray to stringResource(R.string.match_phone_no_signal)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.testTag("match_phone_row")
+                    ) {
+                        Box(Modifier.size(12.dp).background(dot, CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text(text, fontSize = 14.sp)
+                    }
+                }
+                nameCheck?.let { nc ->
+                    val (dot, text) = when (nc.outcome) {
+                        MatchEngine.Outcome.MATCH -> GREEN_OK to stringResource(R.string.match_name_ok)
+                        MatchEngine.Outcome.MISMATCH ->
+                            Color(0xFFFFC107) to stringResource(R.string.match_name_warn)
+
+                        MatchEngine.Outcome.NO_SIGNAL ->
+                            Color.Gray to stringResource(R.string.match_name_no_signal)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.testTag("match_name_row")
+                    ) {
+                        Box(Modifier.size(12.dp).background(dot, CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text(text, fontSize = 14.sp)
+                    }
+                }
                 NextButton(enabled = normalized != null, tag = "next_phone") {
                     step = Step.SUMMARY
                 }

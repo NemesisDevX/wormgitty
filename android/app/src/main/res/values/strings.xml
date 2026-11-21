@@ -23,6 +23,13 @@
     <string name="row_done_glyph">✔</string>
     <string name="admin_disable_warning">تعطيل مسؤول الجهاز هيوقف الحماية المحلية للجهاز.</string>
     <string name="restricted_settings_notice">أندرويد ١٣+ وشّال خاصية «الإعدادات المقيّدة» عن التطبيق بعد التحميل الجانبي. افتح معلومات التطبيق ← النقاط الثلاث ← اسمح بالإعدادات المقيّدة، وارجع للمعالج.</string>
+    <string name="btn_match">مطابقة</string>
+    <string name="match_phone_ok">الرقم مطابق للشريحة</string>
+    <string name="match_phone_warn">الرقم مختلف عن رقم الشريحة — راجعه</string>
+    <string name="match_phone_no_signal">مفيش رقم شريحة متاح للمقارنة</string>
+    <string name="match_name_ok">الاسم قريب من حساب جوجل</string>
+    <string name="match_name_warn">الاسم غير مرتبط بحساب جوجل — تأكد من الكتابة</string>
+    <string name="match_name_no_signal">مفيش حساب جوجل متاح للمقارنة</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>
