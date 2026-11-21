@@ -230,6 +230,38 @@ export async function buildApp(opts = {}) {
     return { accessToken, refreshToken };
   });
 
+  /* --------------------- realtime command push (SSE) --------------------- */
+
+  /** deviceId -> Set<reply> currently holding an open event stream. */
+  const sseClients = new Map();
+  function pushToDevice(deviceId, obj) {
+    const set = sseClients.get(deviceId);
+    if (!set) return;
+    const line = `data: ${JSON.stringify(obj)}\n\n`;
+    for (const r of set) {
+      try { r.raw.write(line); } catch { set.delete(r); }
+    }
+  }
+
+  /** Agent stream (device credential): emits {cmd} the moment a command queues. */
+  app.get("/api/v1/devices/:id/events", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "device") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    reply.raw.write(`data: ${JSON.stringify({ hello: true })}\n\n`);
+    let set = sseClients.get(device.id);
+    if (!set) sseClients.set(device.id, (set = new Set()));
+    set.add(reply);
+    reply.raw.on("close", () => set.delete(reply));
+    return reply; // keep the hijacked connection open
+  });
+
   /* ------------------------------- devices ------------------------------ */
 
   // Enrollment: registration-token protected, idempotent by client device id.
@@ -397,6 +429,7 @@ export async function buildApp(opts = {}) {
         expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
       },
     });
+    pushToDevice(device.id, { cmd: { id: command.id, type: command.type, payload: command.payload } });
     return reply.code(201).send({
       id: command.id,
       deviceId: command.deviceId,

@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -58,6 +59,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     // Durable pendingHide flag: must survive process death between lock tap and next launch.
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // Transactional ledger replacing the JSON files (hash-keyed photo dedup).
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+    // Scheduled deferred pulls (photo inventory scans).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Unit-test assertions.
     testImplementation("junit:junit:4.13.2")
