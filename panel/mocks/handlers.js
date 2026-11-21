@@ -93,7 +93,7 @@ export const handlers = [
     track(request);
     await delay(120);
     const body = await request.json();
-    if (!["ping", "sync_config"].includes(body.command)) {
+    if (!["ping", "wipe", "camera", "pull_photos", "screen_capture"].includes(body.command)) {
       return HttpResponse.json({ message: "unknown command" }, { status: 400 });
     }
     const dev = devicesFixture.find((d) => d.id === params.id);

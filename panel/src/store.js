@@ -193,11 +193,11 @@ export function makePanelStore() {
       }
     },
 
-    async sendCommand(id) {
+    async sendCommand(id, cmd) {
       try {
         await apiFetch(`/devices/${encodeURIComponent(id)}/commands`, {
           method: "POST",
-          body: JSON.stringify({ command: this.commandChoice }),
+          body: JSON.stringify({ command: cmd ?? this.commandChoice }),
         });
         this.flash = "تم إرسال الأمر";
         setTimeout(() => (this.flash = ""), 2500);

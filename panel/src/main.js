@@ -3,8 +3,11 @@ import { parseRoute } from "./store.js";
 import "./styles.css";
 
 async function boot() {
-  const { worker } = await import("../mocks/browser.js");
-  await worker.start({ quiet: true });
+  // MSW mocks stay the default; VITE_USE_BACKEND=true talks to the real API.
+  if (!import.meta.env.VITE_USE_BACKEND) {
+    const { worker } = await import("../mocks/browser.js");
+    await worker.start({ quiet: true });
+  }
 
   Alpine.data("panelRoot", () => ({
     ready: false,

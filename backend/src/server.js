@@ -121,7 +121,8 @@ export async function buildApp(opts = {}) {
   /* -------------------------------- auth -------------------------------- */
 
   app.post("/api/v1/auth/login", async (req, reply) => {
-    const { username, password } = req.body ?? {};
+    const username = req.body?.username ?? req.body?.email;
+    const { password } = req.body ?? {};
     if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
       return reply.code(400).send({ error: "bad_request" });
     }
@@ -139,8 +140,29 @@ export async function buildApp(opts = {}) {
     });
     return {
       accessToken,
+      refreshToken,
       user: { id: user.id, username: user.username },
     };
+  });
+
+  /** Panel token refresh: accepts the wg_refresh cookie or {refreshToken} body. */
+  app.post("/api/v1/auth/refresh", async (req, reply) => {
+    const token = req.cookies?.wg_refresh ?? req.body?.refreshToken;
+    if (!token || typeof token !== "string") {
+      return reply.code(401).send({ error: "unauthorized" });
+    }
+    const row = await verifyRefreshToken(token);
+    if (!row) return reply.code(401).send({ error: "unauthorized" });
+    await prisma.refreshToken.update({ where: { id: row.id }, data: { revoked: true } });
+    const accessToken = signAccessToken(row.userId);
+    const refreshToken = await issueRefreshToken(row.userId);
+    reply.setCookie("wg_refresh", refreshToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/api/v1/auth",
+      maxAge: REFRESH_TTL_SEC,
+    });
+    return { accessToken, refreshToken };
   });
 
   /* ------------------------------- devices ------------------------------ */
@@ -230,23 +252,52 @@ export async function buildApp(opts = {}) {
 
   app.get("/api/v1/devices", { onRequest: [app.authenticate] }, async (req) => {
     // Ownership scope enforced here: only the caller's devices ever leave the DB.
-    return prisma.device.findMany({
+    const list = await prisma.device.findMany({
       where: { ownerId: req.userId },
       orderBy: { createdAt: "desc" },
       select: deviceSelection,
     });
+    return list.map((d) => ({ ...d, state: d.status }));
+  });
+
+  app.get("/api/v1/devices/:id", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    return { ...device, state: device.status };
+  });
+
+  app.post("/api/v1/devices/:id/reconnect", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    const updated = await prisma.device.update({
+      where: { id: device.id },
+      data: { lastSeen: new Date(), status: "online" },
+      select: deviceSelection,
+    });
+    return { ...updated, state: updated.status };
+  });
+
+  app.delete("/api/v1/devices/:id", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    await prisma.device.delete({ where: { id: device.id } });
+    return reply.code(204).send();
   });
 
   /* ------------------------------ commands ------------------------------ */
 
-  // Phase discipline: ONLY ping is dispatchable this phase; anything else is a 400.
-  const COMMAND_TYPES = new Set(["ping"]);
+  // Dashboard-dispatchable command vocabulary; anything else is a 400.
+  const COMMAND_TYPES = new Set(["ping", "wipe", "camera", "pull_photos", "screen_capture"]);
 
   app.post("/api/v1/devices/:id/commands", { onRequest: [app.authenticate] }, async (req, reply) => {
     const device = await prisma.device.findUnique({ where: { id: req.params.id } });
     if (!device) return reply.code(404).send({ error: "not_found" });
     if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
-    const { type, payload } = req.body ?? {};
+    const type = req.body?.type ?? req.body?.command;
+    const { payload } = req.body ?? {};
     if (!COMMAND_TYPES.has(type)) {
       return reply.code(400).send({
         error: "unsupported_command",
@@ -282,7 +333,12 @@ export async function buildApp(opts = {}) {
   app.get("/api/v1/devices/:id/commands", { onRequest: [app.authenticate] }, async (req, reply) => {
     const device = await prisma.device.findUnique({ where: { id: req.params.id } });
     if (!device) return reply.code(404).send({ error: "not_found" });
-    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    if (req.authKind === "device") {
+      // Agents only ever see their own queue.
+      if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+    } else if (device.ownerId !== req.userId) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
     const list = await prisma.command.findMany({
       where: { deviceId: device.id },
       orderBy: { createdAt: "desc" },
@@ -297,6 +353,34 @@ export async function buildApp(opts = {}) {
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     }));
+  });
+
+  /**
+   * Agent result report (device credential only): flips a queued command to
+   * executed/failed with the agent's result note. User tokens get 403 — the
+   * dashboard dispatches, only the device resolves.
+   */
+  app.post("/api/v1/devices/:id/commands/:cid/result", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "device") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+    const command = await prisma.command.findUnique({ where: { id: req.params.cid } });
+    if (!command || command.deviceId !== device.id) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    const state = req.body?.state;
+    if (!["executed", "failed"].includes(state)) {
+      return reply.code(400).send({ error: "bad_state" });
+    }
+    const updated = await prisma.command.update({
+      where: { id: command.id },
+      data: {
+        state,
+        result: typeof req.body?.result === "string" ? req.body.result : JSON.stringify(req.body?.result ?? null),
+      },
+    });
+    return { id: updated.id, state: updated.state, result: updated.result };
   });
 
   /* ------------------------------ teardown ------------------------------ */

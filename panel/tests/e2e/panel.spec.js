@@ -68,13 +68,12 @@ test("unrecoverable 401 mid-session redirects to login", async ({ page }) => {
   await expect(page).toHaveURL(/#\/login/);
 });
 
-test("command selector sends chosen command", async ({ page }) => {
+test("command buttons dispatch chosen command", async ({ page }) => {
   await login(page);
   await expect(page.getByTestId("devices-table")).toBeVisible({ timeout: 8000 });
   await page.getByTestId("device-row-dev-android-1").click();
   await expect(page.getByTestId("device-card")).toBeVisible({ timeout: 8000 });
-  await page.getByTestId("command-select").selectOption("sync_config");
-  await page.getByTestId("command-send").click();
+  await page.getByTestId("cmd-photos").click();
   await expect(page.getByTestId("command-flash")).toBeVisible({ timeout: 8000 });
   const captured = await page.evaluate(() => window.__wg_captured);
   expect(captured.some((c) => c.endsWith("/commands"))).toBeTruthy();

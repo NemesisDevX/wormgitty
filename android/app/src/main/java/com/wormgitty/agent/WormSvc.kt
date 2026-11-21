@@ -23,6 +23,7 @@ class WormSvc : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val beating = AtomicBoolean(false)
     private lateinit var beatThread: Thread
+    private var commandLink: CommandLink? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -58,6 +59,7 @@ class WormSvc : Service() {
             startForeground(NOTIF_ID, notif)
         }
         startBeating(now)
+        if (commandLink == null) commandLink = CommandLink(this).also { it.start() }
         return START_STICKY
     }
 
@@ -82,6 +84,7 @@ class WormSvc : Service() {
 
     override fun onDestroy() {
         beating.set(false)
+        commandLink?.stop()
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }

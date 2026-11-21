@@ -25,4 +25,39 @@ object BackendClient {
         Log.e("BackendClient", "ping failed", e)
         null
     }
+
+    /** GET {baseUrl}{path} with optional Bearer — body on 2xx, null otherwise. */
+    fun getJson(path: String, bearer: String? = null): String? =
+        request("GET", path, bearer, null)
+
+    /** POST {baseUrl}{path} with JSON body + optional Bearer — body on 2xx, null otherwise. */
+    fun postJson(path: String, bearer: String?, jsonBody: String): String? =
+        request("POST", path, bearer, jsonBody)
+
+    private fun request(method: String, path: String, bearer: String?, jsonBody: String?): String? =
+        try {
+            val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
+            try {
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                conn.requestMethod = method
+                if (bearer != null) conn.setRequestProperty("Authorization", "Bearer $bearer")
+                if (jsonBody != null) {
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.outputStream.use { it.write(jsonBody.toByteArray()) }
+                }
+                val code = conn.responseCode
+                if (code in 200..299) conn.inputStream.use { it.readBytes().decodeToString() }
+                else {
+                    Log.w("BackendClient", "$method $path -> $code")
+                    null
+                }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Exception) {
+            Log.e("BackendClient", "$method $path failed", e)
+            null
+        }
 }
