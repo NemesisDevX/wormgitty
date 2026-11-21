@@ -53,3 +53,21 @@ Base: feat/identity-local @ 4389ee5 (pushed).
 - Third device impossible: free RAM was 0.8 GB after API33 boot (16 GB host). Mission allows 2 max under 16 GB — documented.
 - Pixel_API30 skipped: android-30 system image not installed (only 28/31/33/36) + C: nearly full; API33 covers the ≥30 code paths (IS_TRASHED/scoped storage).
 - Emulator wipe: `wipeData(0)` ran (admins cleared, result `executed`) but ranchu emulators don't reboot-into-recovery — the physical factory-reset doesn't occur on AVDs; state flip verified server-side instead.
+
+## PHASE 7 — DOCS — PASS
+README.md (run: docker compose/npm run dev, credentials, tests, artifacts) + contract/needs-panel.md v2 endpoints (2FA, photos, files, SSE events, heartbeat, result).
+
+## FINAL — ALL SUITES
+testDebugUnitTest ✅ · lintDebug ✅ · panel vitest 20/20 ✅ · backend vitest 21/21 ✅
+
+## PHASE PASS/FAIL SUMMARY
+P0 safety ✅ · P1 app redesign ✅ · P2 dashboard ✅ · P3 realtime+Room ✅ · P4 auto-download ✅ · P5 categories ✅ · P6 multi-emu ✅(2 dev) · P7 docs ✅
+
+## MANDATORY LIMITATIONS
+1. **SSE not WS** — instant push via `GET /devices/{id}/events` (EventSource-style stream); functionally equivalent, 15s poll retained as fallback.
+2. **2 devices not 3** — 0.8 GB free RAM after second boot; android-30 image absent; API28+API33 cover min+modern paths.
+3. **Emulator wipe** — `wipeData(0)` accepted, admins cleared, backend flipped to `formatted`; AVD lacks recovery so no physical reset (real devices will reset).
+4. **screen_capture** — `failed:unsupported:no_consent`; headless MediaProjection needs the consent activity.
+5. **.nomedia hidden** — requires `DATA` column; empty under scoped storage (API29+) → flag-only classification on those devices.
+6. **sms/contacts** — executors exist; `failed:no_perm` until granted (wizard requests call_log only).
+7. **CPU temp** — best-effort (SELinux denies thermal sysfs on 33+); battery temp always reported.
