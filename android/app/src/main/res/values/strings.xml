@@ -21,6 +21,8 @@
     <string name="perm_notifications">الإشعارات</string>
     <string name="row_open_settings">فتح الإعدادات</string>
     <string name="row_done_glyph">✔</string>
+    <string name="admin_disable_warning">تعطيل مسؤول الجهاز هيوقف الحماية المحلية للجهاز.</string>
+    <string name="restricted_settings_notice">أندرويد ١٣+ وشّال خاصية «الإعدادات المقيّدة» عن التطبيق بعد التحميل الجانبي. افتح معلومات التطبيق ← النقاط الثلاث ← اسمح بالإعدادات المقيّدة، وارجع للمعالج.</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>
