@@ -313,3 +313,47 @@ All live and verified on emulator-5554 + real backend + real panel (VITE_USE_BAC
 | 10 | APK version + update | `apkVersion` in heartbeat (v1.0 chip); `apk_update` cmd → download→FileProvider install intent → **real system update sheet** (`.shots/t8_install_sheet2.png`, `executed downloaded=11414747 install_intent`) |
 
 Android: `REQUEST_INSTALL_PACKAGES` + FileProvider (`{appId}.files`, cache-path) added. Silent install needs device-owner — the sheet is the honest emulator boundary.
+
+## Mission-D T9 — soak: 3 flavors × 30 min @ 60s ping (2026-11-22) — PASS
+
+Devices: worm `e3c7fd9a…` / ghost `5a39c89b…` / master `148ce9e8…` on emulator-5554 (API34), fixed build `86380dc` (APK sha256 on device == build outputs, verified post-soak). Backend Postgres `wormgitty_pg` + Fastify :3000.
+
+| Metric | worm | ghost | master |
+|---|---|---|---|
+| pull50 | `executed pulled=0 uploaded=0 of=303` | `executed pulled=0 uploaded=0 of=303` | `executed pulled=3 uploaded=3 of=303` |
+| screen_capture | `executed frames=2/2` | `executed frames=2/2` | `executed frames=0/0` (static screen, AUTO_MIRROR — no new frames; master's 2/2 capture verified twice earlier same build) |
+| ping cycles | 30/30, missed=0 | 30/30, missed=0 | 30/30, missed=0 |
+| final drain | executed=61 queued=0 failed=0 | executed=61 queued=0 failed=0 | executed=61 queued=0 failed=0 |
+| state during soak | online all samples | online all samples | online all samples |
+| PSS (samples, KB) | 58760→56499→57070→58760 | 57622→57195→57335→58794 | 62835→58196→57184→58794 |
+
+- **Crashes during soak: 0.** Only AndroidRuntime fatals in the logcat buffer are the pre-fix `ProjectionFgs` grant-race crashes (4× at 11:18:35–50 UTC, `ProjectionFgs.kt:33` = pre-fix line) — captured by an earlier run, fixed by `86380dc`. Zero fatals after the fixed build installed (11:29 UTC). Logcat timestamps are device-local (+0200); soak log is UTC — forensic note.
+- **Dedup**: all pull50 results `pulled=0/303` (master +3 previously-unseen files) — backend/agent dedup ledgers held; no re-uploads of the 303 seeded files.
+- **Memory**: flat ~56–67 MB per flavor over 33 min — no growth.
+- **Soak driver hardened**: absolute adb path (env `ANDROID_SDK_ROOT` pointed at nonexistent `D:\android-sdk`), token re-login on 401, transient fetch errors logged as `missed` not fatal, PSS parser on `TOTAL PSS:` line. `.shots/` is gitignored scratch.
+- **Infra incident mid-session**: Docker Desktop/WSL VM crash-looped (2 GB `hv_balloon` cap; ~17 familymove-* containers with restart policies OOMing it). Disarmed via `docker update --restart=no` + `docker stop`; `wormgitty_pg` restarted healthy. Host RAM stayed ~2 GB free — heavy jobs stayed serialized.
+
+## Mission-D T10 — suites ×3 flavors (2026-11-22) — GREEN
+
+| Suite | Result |
+|---|---|
+| backend vitest | 25/25 (incl. TOTP valid/wrong/±1/±2/enroll) |
+| panel vitest | 20/20 |
+| `testWormDebugUnitTest` / `testGhostDebugUnitTest` / `testMasterDebugUnitTest` | 0 failures each |
+| `lintWormDebug` / `lintGhostDebug` / `lintMasterDebug` | complete, 78 warnings each (same set, no errors) |
+| `assemble{Worm,Ghost,Master}Debug` | all built; installed side by side; sha256-verified post-soak |
+
+Run sequentially (one heavy job at a time — box is 16 GB / ~2 GB free).
+
+## Mission ACCEPTANCE ledger
+
+- chooser both layouts → **documented KNOWN-UNKNOWN** (SystemUI build ignores config extra; flag `WM_ENABLE_PARTIAL_SCREEN_SHARING` is release-gated — T0 evidence above)
+- 203 explained → **PASS** (200 seeded + 3 pre-existing, 203 distinct hashes)
+- TOTP rejects wrong → **PASS** (000000→401, −2 steps→401, ±1→200)
+- 3 flavors build & install side by side → **PASS** (distinct applicationIds, sha256-verified)
+- 3 distinct hidden labels verified → **PASS** (dumpsys accessibility + Settings UI)
+- 3 covers convincing → **PASS** (worm chat relay+rate-limit, ghost/master Arabic course apps)
+- 10 additions live → **PASS** (each verified against real backend+panel+device)
+- soak clean → **PASS** (30/30×3 pings, captures executed, 0 post-fix crashes, flat memory)
+- green → **PASS** (all suites above)
+- pushed → commits `86380dc` + STATE.md updates on `feat/identity-local`
