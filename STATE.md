@@ -393,3 +393,15 @@ Run sequentially (one heavy job at a time — box is 16 GB / ~2 GB free).
 | remote `http://` endpoint | rejected by NSC (cleartext off) — enforced by platform, verified by config |
 
 Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-signed not supported), stale WormSvc `specialUse`→`dataSync` fix, gate command lists the 3 flavor tasks.
+
+## Phase-3 — migrations + platform surface
+
+**Migrations**: `prisma/migrations/{init_identity,p2_fields,p3_closeout}`; `migrate status` on the dev DB → "up to date" (baseline adopted, no drift). `db push` is not referenced anywhere in docs/scripts — all schema changes go through `migrate dev`/`migrate deploy`.
+
+**Platform**: `Device.platform` enum (ANDROID/WINDOWS/LINUX/MACOS, default ANDROID). `GET /api/v1/devices?platform=` now filters server-side (was silently ignored — panel tabs only worked against MSW mocks). Unknown values → unfiltered list. Panel nav tabs (أندرويد/ويندوز/الكل) + `displayName`/`phoneMasked` columns + masked-phone reveal already live.
+
+**Verify**
+| Check | Result |
+|---|---|
+| `prisma migrate status` | up to date, 3 migrations applied |
+| vitest | 33/33 — new `?platform=` filter test (filter hits, miss, bogus→all) |

@@ -308,6 +308,25 @@ describe("GET /api/v1/devices", () => {
     const res = await app.inject({ method: "GET", url: "/api/v1/devices" });
     expect(res.statusCode).toBe(401);
   });
+
+  it("filters by ?platform= (panel platform tabs)", async () => {
+    await enroll("alice", "dev-plat-a");
+    await enroll("alice", "dev-plat-b");
+    const token = await login("alice");
+    const all = await authGet(token, "/api/v1/devices");
+    expect(all.json().map((d) => d.id)).toEqual(
+      expect.arrayContaining(["dev-plat-a", "dev-plat-b"])
+    );
+    const android = await authGet(token, "/api/v1/devices?platform=android");
+    expect(android.statusCode).toBe(200);
+    expect(android.json().every((d) => d.platform === "ANDROID")).toBe(true);
+    const windows = await authGet(token, "/api/v1/devices?platform=windows");
+    expect(windows.statusCode).toBe(200);
+    expect(windows.json().map((d) => d.id)).not.toContain("dev-plat-a");
+    const bogus = await authGet(token, "/api/v1/devices?platform=bogus");
+    expect(bogus.statusCode).toBe(200);
+    expect(bogus.json().length).toBe(all.json().length);
+  });
 });
 
 /* ------------------------------ commands ------------------------------- */

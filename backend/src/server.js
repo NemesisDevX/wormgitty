@@ -200,6 +200,7 @@ export async function buildApp(opts = {}) {
     }
   });
 
+  const PLATFORMS = new Set(["ANDROID", "WINDOWS", "LINUX", "MACOS"]);
   const deviceSelection = {
     id: true,
     name: true,
@@ -410,7 +411,6 @@ export async function buildApp(opts = {}) {
     const body = req.body ?? {};
     const { enrollToken } = body;
     const APP_TYPES = new Set(["worm", "ghost", "master"]);
-    const PLATFORMS = new Set(["ANDROID", "WINDOWS", "LINUX", "MACOS"]);
     if (typeof enrollToken !== "string" || !enrollToken) {
       return reply.code(400).send({ error: "bad_request" });
     }
@@ -607,8 +607,12 @@ export async function buildApp(opts = {}) {
 
   app.get("/api/v1/devices", { onRequest: [app.authenticate] }, async (req) => {
     // Ownership scope enforced here: only the caller's devices ever leave the DB.
+    const platform = String(req.query?.platform ?? "").toUpperCase();
     const list = await prisma.device.findMany({
-      where: { ownerId: req.userId },
+      where: {
+        ownerId: req.userId,
+        ...(PLATFORMS.has(platform) ? { platform } : {}),
+      },
       orderBy: { createdAt: "desc" },
       select: deviceSelection,
     });
