@@ -142,6 +142,19 @@ export async function buildApp(opts = {}) {
   const app = Fastify({ logger: opts.logger ?? false });
   await app.register(cookie);
 
+  // CORS: the panel is normally served same-origin via the vite proxy; when it
+  // is hosted elsewhere only PANEL_ORIGIN may call the API cross-origin.
+  const PANEL_ORIGIN = process.env.PANEL_ORIGIN ?? "";
+  app.addHook("onSend", async (req, reply) => {
+    if (PANEL_ORIGIN && req.headers.origin === PANEL_ORIGIN) {
+      reply.header("Access-Control-Allow-Origin", PANEL_ORIGIN);
+      reply.header("Vary", "Origin");
+      reply.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      reply.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    }
+  });
+  app.options("/*", async (req, reply) => reply.code(204).send());
+
   /**
    * Bearer auth decorator, dual-mode:
    *  - User JWT (typ=access)         -> req.authKind="user",   req.userId=sub

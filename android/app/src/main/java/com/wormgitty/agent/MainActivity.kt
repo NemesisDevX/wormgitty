@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val store = RegistrationStore(this)
         val prefs = HidePrefs(this)
+        kotlinx.coroutines.runBlocking { EndpointPrefs(this@MainActivity).apply() }
 
         // A previous run armed the hide: this launch performs it, then vanishes.
         val hideArmed = kotlinx.coroutines.runBlocking { prefs.pendingHide() }

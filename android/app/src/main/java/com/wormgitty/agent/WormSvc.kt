@@ -29,6 +29,9 @@ class WormSvc : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Endpoint override (set from StatusActivity) must land before any
+        // enrollment/heartbeat traffic leaves the device.
+        kotlinx.coroutines.runBlocking { EndpointPrefs(this@WormSvc).apply() }
         val mgr = getSystemService(NotificationManager::class.java)
         val chan = NotificationChannel(
             CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_MIN

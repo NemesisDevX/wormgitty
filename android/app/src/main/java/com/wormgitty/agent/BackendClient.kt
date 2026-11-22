@@ -7,8 +7,8 @@ import java.net.URL
 /** Minimal transport seam: liveness probe against the local backend. */
 object BackendClient {
 
-    /** Emulator's alias for the host loopback; real devices use the LAN address. */
-    var baseUrl: String = "http://10.0.2.2:3000"
+    /** Build-time default (WG_BASE_URL); EndpointPrefs may override at runtime. */
+    var baseUrl: String = BuildConfig.WG_BASE_URL
 
     /** GET {baseUrl}/api/v1/ping — returns the HTTP status code, null when unreachable. */
     fun ping(): Int? = try {

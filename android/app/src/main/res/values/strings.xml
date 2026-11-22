@@ -98,4 +98,6 @@
     <string name="btn_retry">إعادة المحاولة</string>
     <string name="btn_copy_token">نسخ كود التفعيل</string>
     <string name="enroll_token_hint">كود تفعيل جديد</string>
+    <string name="endpoint_hint">رابط السيرفر — https://…</string>
+    <string name="endpoint_save">حفظ الرابط</string>
 </resources>

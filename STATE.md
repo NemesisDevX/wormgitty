@@ -378,3 +378,18 @@ Run sequentially (one heavy job at a time — box is 16 GB / ~2 GB free).
 | curl smoke | mint→enroll 201, reuse→401, hb(new cred)→200, hb(legacy)→401 when flag off, reveal→`+201012345678`, masked `+201****5678`, `phone=""` in row |
 | emulator e2e | emulator-5560 (fresh AVD; emulator-5554 is driven by external automation — focus theft + `pm uninstall`): minted token baked via `-PWG_ENROLL_TOKEN`, wizard driven by uiautomator taps → device `240d7ac42a…` enrolled `display_name="Omar Emu"`, `phone_masked="+201****5432"`, `phone=""`, `platform=ANDROID`, `app_type=worm`, `credential_hash` set; `last_seen` ticking (19:18:12→19:18:42) = heartbeats on the stored credential; aliases vanished post-seal. An earlier 5554 run also enrolled (`e2ba876f…`, name garbled by tap timing — input, not code). |
 | `git grep global-dev-seed` | server legacy path + `DeviceAuth` LEGACY_SEED + tests/docs only |
+
+## Phase-2 — remote endpoint + TLS
+
+**App**: `BuildConfig.WG_BASE_URL` (gradle prop, default `http://10.0.2.2:3000`); `BackendClient.baseUrl` seeded from it; `EndpointPrefs` (DataStore `endpoint_prefs`) persists a runtime override set in `StatusActivity` (EditText+save on the `*#*#2468#*#*` screen); applied via `runBlocking` at `WormSvc.onCreate` + `MainActivity.onCreate` before enrollment/traffic. Manifest `usesCleartextTraffic=false` + `res/xml/network_security_config.xml` — cleartext only to 10.0.2.2/localhost/127.0.0.1.
+
+**Server**: `PANEL_ORIGIN` env pins `Access-Control-Allow-Origin` to the panel origin only (no headers otherwise); `OPTIONS /*` → 204. Panel is same-origin via vite proxy in dev.
+
+**Verify**
+| Check | Result |
+|---|---|
+| `compileWormDebugKotlin` + `compileWormDebugAndroidTestKotlin` | clean |
+| backend vitest | 32/32 after OPTIONS+CORS hook |
+| remote `http://` endpoint | rejected by NSC (cleartext off) — enforced by platform, verified by config |
+
+Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-signed not supported), stale WormSvc `specialUse`→`dataSync` fix, gate command lists the 3 flavor tasks.

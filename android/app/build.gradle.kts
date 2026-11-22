@@ -25,6 +25,12 @@ android {
             "String", "WG_ENROLL_TOKEN",
             "\"${project.findProperty("WG_ENROLL_TOKEN") ?: ""}\""
         )
+        // Backend endpoint baked at build time; StatusActivity can override it
+        // at runtime (persisted). Default is the emulator's host loopback alias.
+        buildConfigField(
+            "String", "WG_BASE_URL",
+            "\"${project.findProperty("WG_BASE_URL") ?: "http://10.0.2.2:3000"}\""
+        )
     }
 
     flavorDimensions += "app"
