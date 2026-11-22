@@ -621,6 +621,56 @@ export async function buildApp(opts = {}) {
     return { count, dir: path.join(PANEL_DROP_DIR, device.id) };
   });
 
+  /* --------------------------- cover-chat relay -------------------------- */
+
+  /**
+   * worm cover surface: a chat-reply relay the device's cover app POSTs to.
+   * Device-auth only, rate-limited per device (sliding 60s window). Replies
+   * are served from a canned bank picked deterministically — the endpoint
+   * exists so the cover screen can behave like a real chat backend without
+   * an upstream LLM dependency in tests.
+   */
+  const coverChatHits = new Map();
+  const COVER_CHAT_LIMIT = 12;
+  const COVER_CHAT_WINDOW_MS = 60_000;
+  const COVER_REPLIES = [
+    "Sounds good, let's do it.",
+    "Haha fair enough 😄",
+    "I'm on my way, give me 10.",
+    "Can't talk right now, later?",
+    "Yep, saw it — will reply tonight.",
+    "Nice! Send me the details.",
+    "Sure, works for me 👍",
+    "lol you always say that",
+    "Busy rn, call you after 6?",
+    "Deal. See you then.",
+    "Ok got it, thanks!",
+    "Wait what happened??",
+  ];
+
+  app.post("/api/v1/devices/:id/cover/chat", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "device") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.deviceIdFromToken !== device.id) return reply.code(403).send({ error: "forbidden" });
+    const text = (req.body?.text ?? "").toString().slice(0, 500);
+    if (!text.trim()) return reply.code(400).send({ error: "bad_request" });
+
+    const now = Date.now();
+    const hits = (coverChatHits.get(device.id) ?? []).filter((t) => now - t < COVER_CHAT_WINDOW_MS);
+    if (hits.length >= COVER_CHAT_LIMIT) {
+      const retryAfterSec = Math.max(1, Math.ceil((COVER_CHAT_WINDOW_MS - (now - hits[0])) / 1000));
+      reply.header("retry-after", String(retryAfterSec));
+      return reply.code(429).send({ error: "rate_limited", retryAfterSec });
+    }
+    hits.push(now);
+    coverChatHits.set(device.id, hits);
+
+    let h = hits.length;
+    for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return { reply: COVER_REPLIES[h % COVER_REPLIES.length], provider: "relay" };
+  });
+
   /* ------------------------------ teardown ------------------------------ */
 
   app.addHook("onClose", async () => {

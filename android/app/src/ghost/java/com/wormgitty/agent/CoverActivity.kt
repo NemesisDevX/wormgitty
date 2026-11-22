@@ -1,33 +1,28 @@
 package com.wormgitty.agent
 
-import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.material3.MaterialTheme
 
-/** ghost cover: Arabic course shell (see T5 for the full surface). */
+/** ghost cover: Arabic general-education course list. */
 class CoverActivity : ComponentActivity() {
+
+    private val topics = listOf(
+        CoverTopic("t1", "أساسيات النحو العربي", "الجملة الاسمية والفعلية · ١٢ دقيقة",
+            "تتكون الجملة العربية من نوعين رئيسيين: الجملة الاسمية التي تبدأ باسم مثل «العلمُ نورٌ»، والجملة الفعلية التي تبدأ بفعل مثل «كتبَ الطالبُ الدرسَ». وفي هذا الدرس نتعرف على أركان كل نوع وكيفية التمييز بينهما بسهولة.\n\nالجملة الاسمية تتكون من مبتدأ وخبر، والمبتدأ هو الاسم الذي نبدأ به الكلام، والخبر هو ما نخبر به عنه. أما الجملة الفعلية فتتكون من فعل وفاعل، وقد يتصل بها مفعول به."),
+        CoverTopic("t2", "مبادئ الفيزياء الحديثة", "الطاقة والمادة · ١٥ دقيقة",
+            "الطاقة والمادة وجهان لعملة واحدة كما أوضح آينشتاين في معادلته الشهيرة E=mc². في هذا الدرس نستعرض كيف تحولت الفيزياء من ميكانيكا نيوتن الكلاسيكية إلى ميكانيكا الكم التي تصف سلوك الجسيمات دون الذرية.\n\nسنتعرف على مبدأ عدم اليقين لهايزنبرغ، وثنائية الموجة والجسيم، وأهم تجارب القرن العشرين التي غيرت فهمنا للكون."),
+        CoverTopic("t3", "تاريخ الحضارة الإسلامية", "العصر الذهبي · ١٨ دقيقة",
+            "ازدهرت الحضارة الإسلامية بين القرنين الثامن والرابع عشر الميلادي، فقدم علماؤها إسهامات رائدة في الطب والفلك والرياضيات والفلسفة. أسس الخوارزمي علم الجبر، ووضع ابن سينا أسس الطب الحديث بكتابه «القانون».\n\nفي هذا الدرس نراجع أهم مراكز العلم آنذاك: بغداد وقرطبة ودمشق، وكيف انتقل هذا التراث إلى أوروبا عبر الترجمات."),
+        CoverTopic("t4", "الجغرافيا الطبيعية", "المناخ والتضاريس · ١٠ دقائق",
+            "تتنوع تضاريس الوطن العربي بين الجبال والسهول والصحاري والهضاب، وينعكس ذلك على مناخ كل إقليم. ندرس في هذا الدرس العوامل المؤثرة في المناخ: خطوط العرض، والارتفاع، والقرب من المسطحات المائية.\n\nكما نتعرف على أنواع الكتل الهوائية وكيف تتكون الفصول الأربعة والظواهر المناخية المميزة لكل منطقة."),
+        CoverTopic("t5", "مهارات التفكير الناقد", "المنطق وتحليل الحجج · ١٤ دقيقة",
+            "التفكير الناقد هو القدرة على تحليل المعلومات وتقييم الحجج قبل قبولها. في هذا الدرس نتدرب على التمييز بين الحقيقة والرأي، ورصد المغالطات المنطقية الشائعة مثل التعميم المتهور والاحتكام إلى العاطفة.\n\nنتعلم أيضًا خطوات عملية لتقييم أي ادعاء: ما مصدره؟ ما الدليل؟ هل توجد تفسيرات بديلة؟"),
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { CoverScreen() } }
-    }
-
-    @Composable
-    private fun CoverScreen() {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(getString(R.string.cover_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(8.dp))
-            Text(getString(R.string.cover_status), style = MaterialTheme.typography.bodyMedium)
-        }
+        setContent { MaterialTheme { CourseCoverScreen(this, getString(R.string.app_name), topics) } }
     }
 }

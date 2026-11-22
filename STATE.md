@@ -266,3 +266,11 @@ Goal: force the API34 chooser layout (`MediaProjectionConfig.createConfigForUser
 - master → **System Framework**
 
 UIAutomator dump: `a11y_settings.xml`; screenshot: `.shots/t4_a11y_labels.png`. `dumpsys accessibility` Bound services shows the same three labels bound at once.
+
+## Mission-B T5 — cover UIs live — PASS (2026-11-22)
+
+- **worm**: English chat screen (WhatsApp-style dark UI — contact bar "Alex Morgan·online", bubbles, typing indicator, input+Send). Verified rendering + send flow on emulator; reply arrived via fallback when backend lacked the route, then **real relay reply** after restart.
+- **ghost**: RTL Arabic course app "أكاديمية المعرفة" — 5 topics (نحو/فيزياء/تاريخ/جغرافيا/تفكير ناقد) + article bodies + progress "1 / 5 دروس مكتملة" persisted via SharedPreferences. Verified tap→article→progress.
+- **master**: same shape, programming topics (Kotlin/Compose/Git/Data structures/HTTP), "أكاديمية الكود". Verified render.
+- **Backend** `POST /api/v1/devices/:id/cover/chat`: device-auth (401 wrong cred), per-device sliding-window rate limit **12/60s → 429 + retryAfterSec** (verified 11×200 then 429). Canned reply bank, deterministic pick.
+- Android `CoverChat` (main): derives device credential like CommandLink, POSTs text, canned **offline fallback** if relay unreachable/limit — cover never breaks.
