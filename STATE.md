@@ -234,3 +234,9 @@ Goal: force the API34 chooser layout (`MediaProjectionConfig.createConfigForUser
 2. App-picker path exists but is gated by unreleased aconfig flag `WM_ENABLE_PARTIAL_SCREEN_SHARING`; overrides tried: `device_config put systemui wm_enable_partial_screen_sharing true`, `setprop persist.sysui.flag.wm_enable_partial_screen_sharing true`, `setprop persist.sysui.flag.rel 0` (+ SystemUI restart each time) — dialog stayed classic (release-mode build `exp_flag_release=true` ignores overrides).
 3. `MediaProjectionAppSelectorActivity` is `exported=false` + `permission=MANAGE_MEDIA_PROJECTION` (signature) → cannot be launched directly.
 → **KNOWN-UNKNOWN**: chooser layout reachable only on builds/images shipping the flag on (e.g. stock Pixel API34 QPR or API35+ images) — none available offline on x86_64.
+
+## Mission-A T1 — 203 vs 200 reconciled + dedup integrity (2026-11-22) — PASS
+
+**Reconciliation**: `/sdcard/Pictures/vault/` holds 204 files = `.nomedia` + **h000–h199** (200 seeded for the scale run) + **h0,h1,h2** (3 left over from the earlier T4 hidden-photos verification, same dir). Inventory `hidden:203` was correct — nothing phantom.
+
+**Dedup hides nothing**: backend `DevicePhoto` for `dfe16a6784d6c769` — hidden rows **203**, distinct SHA-256 hashes **203**, distinct names **203**. Every pulled file had unique content. Dedup semantics verified twice: 3 byte-identical PNGs → 1 row; re-pull of already-ledgered 300 originals → `pulled=0 of=300` (all in dedup ledger, zero new uploads, zero overwrites).
