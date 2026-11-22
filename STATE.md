@@ -240,3 +240,13 @@ Goal: force the API34 chooser layout (`MediaProjectionConfig.createConfigForUser
 **Reconciliation**: `/sdcard/Pictures/vault/` holds 204 files = `.nomedia` + **h000–h199** (200 seeded for the scale run) + **h0,h1,h2** (3 left over from the earlier T4 hidden-photos verification, same dir). Inventory `hidden:203` was correct — nothing phantom.
 
 **Dedup hides nothing**: backend `DevicePhoto` for `dfe16a6784d6c769` — hidden rows **203**, distinct SHA-256 hashes **203**, distinct names **203**. Every pulled file had unique content. Dedup semantics verified twice: 3 byte-identical PNGs → 1 row; re-pull of already-ledgered 300 originals → `pulled=0 of=300` (all in dedup ledger, zero new uploads, zero overwrites).
+
+## Mission-A T2 — TOTP second factor (otplib) — PASS (2026-11-22)
+
+- `otplib@12.0.1` added; `authenticator.options={window:1}` → accepts ±1 step.
+- `PANEL_TOTP_SECRET` (base32) lives in `.env` only — never persisted per user.
+- `/api/v1/auth/2fa`: `checkSecondFactor` → `authenticator.check` when secret set, legacy `PANEL_2FA_CODE` fallback otherwise.
+- `POST /api/v1/auth/totp/enroll` (user-auth): returns `otpauth://` URI + params; 401 unauth, 404 unconfigured.
+- Live-verified on the running server: `000000`→401 invalid_code · current code→200 · **prev-step code→200 (window)** · **−2 steps→401**.
+- `.shots/` helpers (pull.mjs, t5/t6*.cjs) switched to generate TOTP from `PANEL_TOTP_SECRET`.
+- Tests: +4 cases (valid, wrong→401, ±1/±2 window, enroll auth+URI). Suite **25/25 green**.

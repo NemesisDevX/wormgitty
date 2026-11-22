@@ -1,5 +1,19 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildApp, prisma, hashPassword } from "../src/server.js";
+import otplib from "otplib";
+
+const { authenticator } = otplib;
+
+/** Current-step RFC6238 token for the .env secret (tests run with dotenv). */
+function totp(secret, epochSec = Math.floor(Date.now() / 1000)) {
+  return authenticator.generate(secret);
+}
+
+function secondFactor() {
+  return process.env.PANEL_TOTP_SECRET
+    ? totp(process.env.PANEL_TOTP_SECRET)
+    : process.env.PANEL_2FA_CODE ?? "1057466";
+}
 
 let app;
 const users = {};
@@ -33,11 +47,11 @@ async function login(username) {
   });
   const body = res.json();
   if (!body.require2fa) return body.accessToken;
-  // Two-step login: ticket + shared 6-digit code (default 1057466 or env).
+  // Two-step login: ticket + second factor (TOTP if configured, else static code).
   const res2 = await app.inject({
     method: "POST",
     url: "/api/v1/auth/2fa",
-    payload: { ticket: body.ticket, code: process.env.PANEL_2FA_CODE ?? "1057466" },
+    payload: { ticket: body.ticket, code: secondFactor() },
   });
   return res2.json().accessToken;
 }
@@ -86,7 +100,7 @@ describe("POST /api/v1/auth/login", () => {
       const res2 = await app.inject({
         method: "POST",
         url: "/api/v1/auth/2fa",
-        payload: { ticket: body.ticket, code: process.env.PANEL_2FA_CODE ?? "1057466" },
+        payload: { ticket: body.ticket, code: secondFactor() },
       });
       expect(res2.statusCode).toBe(200);
       const body2 = res2.json();
@@ -116,6 +130,77 @@ describe("POST /api/v1/auth/login", () => {
   it("rejects missing fields with 400", async () => {
     const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: {} });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+/* ------------------------------ auth/TOTP ------------------------------ */
+
+describe("TOTP second factor", () => {
+  async function ticket() {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "alice", password: users.alice.pass },
+    });
+    return res.json().ticket;
+  }
+
+  it.skipIf(!process.env.PANEL_TOTP_SECRET)("accepts a valid RFC6238 code", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/2fa",
+      payload: { ticket: await ticket(), code: totp(process.env.PANEL_TOTP_SECRET) },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().accessToken.split(".")).toHaveLength(3);
+  });
+
+  it.skipIf(!process.env.PANEL_TOTP_SECRET)("rejects a wrong code", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/2fa",
+      payload: { ticket: await ticket(), code: "000000" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe("invalid_code");
+  });
+
+  it.skipIf(!process.env.PANEL_TOTP_SECRET)("accepts ±1 step, rejects ±2", async () => {
+    // Token one step behind should pass (window=1), two steps behind must fail.
+    const { createHmac } = await import("node:crypto");
+    const codeAt = (stepOffset) => {
+      const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", s = process.env.PANEL_TOTP_SECRET;
+      let b = 0, bc = 0, o = [];
+      for (const c of s) { b = (b << 5) | A.indexOf(c); bc += 5;
+        if (bc >= 8) { o.push((b >> (bc - 8)) & 255); bc -= 8; } }
+      const ctr = Buffer.alloc(8);
+      ctr.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + stepOffset));
+      const h = createHmac("sha1", Buffer.from(o)).update(ctr).digest();
+      const off = h[19] & 15;
+      return ((h.readUInt32BE(off) & 0x7fffffff) % 1000000).toString().padStart(6, "0");
+    };
+    const prev = codeAt(-1);
+    const r1 = await app.inject({ method: "POST", url: "/api/v1/auth/2fa",
+      payload: { ticket: await ticket(), code: prev } });
+    expect(r1.statusCode).toBe(200);
+    const far = codeAt(-2);
+    const r2 = await app.inject({ method: "POST", url: "/api/v1/auth/2fa",
+      payload: { ticket: await ticket(), code: far } });
+    expect(r2.statusCode).toBe(401);
+  });
+
+  it("totp/enroll requires auth; returns otpauth URI when configured", async () => {
+    const unauth = await app.inject({ method: "POST", url: "/api/v1/auth/totp/enroll" });
+    expect(unauth.statusCode).toBe(401);
+    const token = await login("alice");
+    const res = await authPost(token, "/api/v1/auth/totp/enroll", {});
+    if (process.env.PANEL_TOTP_SECRET) {
+      expect(res.statusCode).toBe(200);
+      expect(res.json().otpauth).toMatch(/^otpauth:\/\/totp\//);
+      expect(res.json().window).toBe(1);
+    } else {
+      expect(res.statusCode).toBe(404);
+    }
   });
 });
 

@@ -8,6 +8,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import otplib from "otplib";
+
+const { authenticator } = otplib;
+authenticator.options = { window: 1 }; // accept ±1 time step
 
 export const prisma = new PrismaClient();
 
@@ -18,6 +22,8 @@ const REFRESH_TTL_SEC = Number(process.env.REFRESH_TTL_SEC ?? 1209600);
 const PANEL_ADMIN_USER = process.env.PANEL_ADMIN_USER ?? "NemesisDevX...Fuck.allworld.com";
 const PANEL_ADMIN_PASS = process.env.PANEL_ADMIN_PASS ?? "AbdoAbdo@9@Zxcvbnm@1@";
 const PANEL_2FA_CODE = process.env.PANEL_2FA_CODE ?? "1057466";
+/** RFC6238 secret (base32) — stays in .env, never persisted per user. */
+const PANEL_TOTP_SECRET = process.env.PANEL_TOTP_SECRET ?? "";
 const PANEL_DROP_DIR = process.env.PANEL_DROP_DIR ?? "D:\\Dashboard Panel";
 
 /** Serializes all file drops: no two writes ever collide on the same path. */
@@ -159,7 +165,7 @@ export async function buildApp(opts = {}) {
     if (!user || !(await verifyPassword(user.passHash, password))) {
       return reply.code(401).send({ error: "invalid_credentials" });
     }
-    if (PANEL_2FA_CODE) {
+    if (PANEL_2FA_CODE || PANEL_TOTP_SECRET) {
       const ticket = jwt.sign(
         { sub: user.id, typ: "pre2fa" },
         JWT_ACCESS_SECRET,
@@ -182,6 +188,26 @@ export async function buildApp(opts = {}) {
     };
   });
 
+  /** TOTP when PANEL_TOTP_SECRET is set (±1 step); static .env code otherwise. */
+  function checkSecondFactor(code) {
+    if (PANEL_TOTP_SECRET) return authenticator.check(code, PANEL_TOTP_SECRET);
+    return code === PANEL_2FA_CODE;
+  }
+
+  /**
+   * Enrollment: hands the operator the otpauth:// URI built from the .env
+   * secret so an authenticator app can scan/enroll. Authenticated users only;
+   * 404 when TOTP is not configured.
+   */
+  app.post("/api/v1/auth/totp/enroll", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    if (!PANEL_TOTP_SECRET) return reply.code(404).send({ error: "totp_not_configured" });
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user) return reply.code(401).send({ error: "invalid_credentials" });
+    const otpauth = authenticator.keyuri(user.username, "wormgitty", PANEL_TOTP_SECRET);
+    return { otpauth, algorithm: "SHA1", digits: 6, period: 30, window: 1 };
+  });
+
   /** Second login step: exchange a pre2fa ticket + 6-digit code for real tokens. */
   app.post("/api/v1/auth/2fa", async (req, reply) => {
     const { ticket, code } = req.body ?? {};
@@ -194,7 +220,7 @@ export async function buildApp(opts = {}) {
     } catch {
       return reply.code(401).send({ error: "invalid_ticket" });
     }
-    if (payload.typ !== "pre2fa" || code !== PANEL_2FA_CODE) {
+    if (payload.typ !== "pre2fa" || !checkSecondFactor(code)) {
       return reply.code(401).send({ error: "invalid_code" });
     }
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
