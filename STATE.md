@@ -87,3 +87,9 @@ P0 safety ✅ · P1 app redesign ✅ · P2 dashboard ✅ · P3 realtime+Room ✅
 - contacts → `executed:dumped` — 1 row (`SeededContact +15557776666`) seeded via raw_contacts+data insert
 - call_log → `executed:dumped` — 1 row (`+15559998877` incoming) seeded via emulator console `gsm call/accept/cancel`
 - Dumps upload to drop dir kind=dump; empty-result uploads get 400 (empty b64 rejected — correct).
+
+## GAP RUN — T4 HIDDEN PHOTOS — PASS
+- `.nomedia` files never enter MediaStore → added `nomediaScan()` fs-walk in `MediaStorePuller` (dirs with `.nomedia` marker → hidden candidates, fs-read for hash/bytes).
+- Seeded `/sdcard/Pictures/secret/.nomedia` + 3 unique PNGs → `pull_photos {category:'hidden'}` → `executed pulled=3 uploaded=3`; `/photos` counts `{original:3,hidden:4}`; files at `hidden/1795330742*_img_-1427*_hidden_*.png`.
+- Earlier identical-content seed deduped correctly to 1 row (hash dedup verified in-band).
+- LIMITATION: fs .nomedia scan needs readable DATA paths — scoped-storage devices (API29+) can't fs-walk other dirs; there it relies on IS_PENDING flag only.
