@@ -158,9 +158,12 @@ class MediaStorePuller(private val context: Context, private val keySource: KeyS
         }
 
     private fun readCandidate(c: Candidate): Pair<String, ByteArray>? = runCatching {
-        if (c.id < 0) {
-            // fs-sourced (.nomedia) — read directly
-            hashBytes(File(c.dataPath!!).readBytes())
+        // API 34: MediaStore indexes .nomedia files (id >= 0) but their
+        // content rows are phantom — openInputStream fails with "No item".
+        // Read the file directly whenever a readable path exists.
+        val fs = c.dataPath?.let(::File)?.takeIf { it.isFile && it.canRead() }
+        if (fs != null) {
+            hashBytes(fs.readBytes())
         } else {
             val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI.buildUpon()
                 .appendPath(c.id.toString()).build()
