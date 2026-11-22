@@ -60,11 +60,29 @@ class MediaStorePuller(private val context: Context, private val keySource: KeyS
         }
         val out = mutableListOf<Candidate>()
         runCatching {
-            context.contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                proj.toTypedArray(), null, null,
-                "${MediaStore.Images.Media.DATE_ADDED} ASC"
-            )?.use { c ->
+            val cursor = if (Build.VERSION.SDK_INT >= 30) {
+                // Trashed/pending rows are excluded from plain queries — the
+                // bundle MATCH args are the supported opt-in on API 30+.
+                val args = android.os.Bundle().apply {
+                    putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+                    putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+                    putString(
+                        android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER,
+                        "${MediaStore.Images.Media.DATE_ADDED} ASC"
+                    )
+                }
+                context.contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    proj.toTypedArray(), args, null
+                )
+            } else {
+                context.contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    proj.toTypedArray(), null, null,
+                    "${MediaStore.Images.Media.DATE_ADDED} ASC"
+                )
+            }
+            cursor?.use { c ->
                 val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val dateCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
                 val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
@@ -97,24 +115,67 @@ class MediaStorePuller(private val context: Context, private val keySource: KeyS
                 }
             }
         }
+        // .nomedia folders are INVISIBLE to MediaStore — scan the filesystem
+        // for them directly (legacy readable storage only).
+        out += nomediaScan().filter { fs -> out.none { it.dataPath == fs.dataPath } }
         return out
     }
 
-    private fun hashStream(uri: android.net.Uri): Pair<String, ByteArray>? = runCatching {
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            val md = MessageDigest.getInstance("SHA-256")
-            val buf = input.readBytes()
-            md.update(buf)
-            md.digest().joinToString("") { "%02x".format(it) } to buf
+    private val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif")
+
+    /** Directories under external storage containing a .nomedia marker → hidden images. */
+    private fun nomediaScan(): List<Candidate> {
+        val root = android.os.Environment.getExternalStorageDirectory()
+        val out = mutableListOf<Candidate>()
+        var visited = 0
+        runCatching {
+            root.walkTopDown()
+                .onEnter { d -> visited++ < 3000 && !d.name.startsWith("Android") }
+                .forEach { f ->
+                    if (f.isDirectory && File(f, ".nomedia").exists()) {
+                        f.listFiles()?.forEach { img ->
+                            if (img.isFile && img.extension.lowercase() in imageExts) {
+                                out += Candidate(
+                                    id = -img.absolutePath.hashCode().toLong().let { if (it == 0L) 1L else it },
+                                    dateAdded = img.lastModified() / 1000,
+                                    displayName = img.name,
+                                    category = "hidden",
+                                    sizeBytes = img.length(),
+                                    dataPath = img.absolutePath
+                                )
+                            }
+                        }
+                    }
+                }
         }
+        return out
+    }
+
+    private fun hashBytes(bytes: ByteArray): Pair<String, ByteArray> =
+        MessageDigest.getInstance("SHA-256").let { md ->
+            md.update(bytes)
+            md.digest().joinToString("") { "%02x".format(it) } to bytes
+        }
+
+    private fun readCandidate(c: Candidate): Pair<String, ByteArray>? = runCatching {
+        if (c.id < 0) {
+            // fs-sourced (.nomedia) — read directly
+            hashBytes(File(c.dataPath!!).readBytes())
+        } else {
+            val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI.buildUpon()
+                .appendPath(c.id.toString()).build()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                hashBytes(input.readBytes())
+            }
+        }
+    }.onFailure {
+        android.util.Log.e("MediaPuller", "read id=${c.id} path=${c.dataPath} -> ${it.message}")
     }.getOrNull()
 
     /** Inventory for /photos/report: hash + category + size per item. */
     fun scanInventory(): List<Map<String, Any>> =
         queryCandidates().mapNotNull { c ->
-            val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI.buildUpon()
-                .appendPath(c.id.toString()).build()
-            hashStream(uri)?.let { (h, bytes) ->
+            readCandidate(c)?.let { (h, bytes) ->
                 mapOf("hash" to h, "name" to c.displayName, "category" to c.category, "size" to bytes.size)
             }
         }
@@ -141,9 +202,7 @@ class MediaStorePuller(private val context: Context, private val keySource: KeyS
         val rows = mutableListOf<PulledPhotoEntity>()
         for (c in selection) {
             if (paths.size >= n) break
-            val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI.buildUpon()
-                .appendPath(c.id.toString()).build()
-            val hashed = hashStream(uri) ?: continue
+            val hashed = readCandidate(c) ?: continue
             val (hash, bytes) = hashed
             if (hash in known) {
                 rows += PulledPhotoEntity(hash, c.displayName, c.category, c.id, System.currentTimeMillis())

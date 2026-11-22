@@ -164,7 +164,7 @@ class CommandLink(private val context: Context) {
                     if (uploadFile("photo", cat ?: "original", File(path).name, File(path), hash)) uploaded++
                 }
                 reportInventory()
-                "executed" to "pulled=${r.pulled} uploaded=$uploaded"
+                "executed" to "pulled=${r.pulled} uploaded=$uploaded of=${r.existing}"
             }
 
             "camera" -> {

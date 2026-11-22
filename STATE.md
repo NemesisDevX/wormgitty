@@ -93,3 +93,10 @@ P0 safety ✅ · P1 app redesign ✅ · P2 dashboard ✅ · P3 realtime+Room ✅
 - Seeded `/sdcard/Pictures/secret/.nomedia` + 3 unique PNGs → `pull_photos {category:'hidden'}` → `executed pulled=3 uploaded=3`; `/photos` counts `{original:3,hidden:4}`; files at `hidden/1795330742*_img_-1427*_hidden_*.png`.
 - Earlier identical-content seed deduped correctly to 1 row (hash dedup verified in-band).
 - LIMITATION: fs .nomedia scan needs readable DATA paths — scoped-storage devices (API29+) can't fs-walk other dirs; there it relies on IS_PENDING flag only.
+
+## T5 — Deleted/trashed photos (API 33) — PASS
+- Seed: 3 PNGs pushed → committed via MEDIA_SCANNER broadcast → trashed via `content update .../media/<id> --bind is_trashed:i:1` (files renamed `.trashed-*`).
+- Fix: `queryCandidates` now uses Bundle `QUERY_ARG_MATCH_TRASHED`/`QUERY_ARG_MATCH_PENDING` = `MATCH_INCLUDE` (API 30+). Trashed/pending rows are invisible to plain queries; URI `include`/`includeTrashed` params did NOT work on emulator provider.
+- Fix: removed `setRequireOriginal` — it demands `ACCESS_MEDIA_LOCATION` (not held) and broke ALL reads (every row failed openInputStream). Plain URI reads work for trashed rows.
+- Result: DEL pull → `pulled=3 uploaded=3 of=3`; counts `{original:4,hidden:0,deleted:3}`; files in `D:\Dashboard Panel\420ae8caf5351e0c\deleted\`.
+- Result string now includes `of=<existing>` for diagnostics; readCandidate logs failures to `MediaPuller`.
