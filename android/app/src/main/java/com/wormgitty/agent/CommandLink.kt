@@ -269,6 +269,10 @@ class CommandLink(private val context: Context) {
             ProjectionClickBus.armed = true
             val i = android.content.Intent(context, ConsentActivity::class.java)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(
+                    ConsentActivity.EXTRA_CHOOSER,
+                    payload?.get("chooser")?.jsonPrimitive?.content == "true"
+                )
             // API 34 BAL: a plain startActivity stays invisible even with the
             // SAW exemption. A PendingIntent sent with the background-start
             // option raises the task to the foreground.

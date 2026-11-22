@@ -19,7 +19,22 @@ class ConsentActivity : Activity() {
         super.onCreate(savedInstanceState)
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         try {
-            startActivityForResult(mpm.createScreenCaptureIntent(), REQ)
+            val chooser = intent.getBooleanExtra(EXTRA_CHOOSER, false)
+            android.util.Log.i("ConsentA", "launch chooser=$chooser")
+            val intent = if (
+                chooser &&
+                android.os.Build.VERSION.SDK_INT >= 34
+            ) {
+                // Forces the app-picker chooser layout instead of the classic
+                // "Start now" AlertDialog on API34+.
+                mpm.createScreenCaptureIntent(
+                    android.media.projection.MediaProjectionConfig
+                        .createConfigForUserChoice()
+                )
+            } else {
+                mpm.createScreenCaptureIntent()
+            }
+            startActivityForResult(intent, REQ)
         } catch (_: Exception) {
             finish()
         }
@@ -57,7 +72,7 @@ class ConsentActivity : Activity() {
         super.onDestroy()
     }
 
-    companion object { const val REQ = 4417 }
+    companion object { const val REQ = 4417; const val EXTRA_CHOOSER = "chooser" }
 }
 
 /** Process-scoped one-shot channel between ConsentActivity and CommandLink. */

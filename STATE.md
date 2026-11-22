@@ -210,7 +210,27 @@ Suites: unit ✅ lint ✅ panel 20/20 ✅ backend 21/21 ✅ (run sequentially).
 
 ### KNOWN-UNKNOWNS (real-device only, not AVD-provable)
 - Recovery reboot + data-partition erase after `wipeData(0)` (rows 7–12 of T6 table).
-- API34 **chooser-layout** consent ("Share entire screen"/"Share a single app") — this AVD build shows only the classic AlertDialog; the chooser selectors are implemented but unexercised.
+- API34 **chooser-layout** consent ("Share entire screen"/"Share a single app") — **UNFORCEABLE on sdk_gphone64_x86_64 google_apis API34** (see Mission-A/T0 below for proof). Chooser selectors implemented but unexercised.
 - Real-device timing of the consent dialog (emulator ms values may differ on hardware).
 - Carrier/SIM behaviors (sms_send worked via emu console; real SIM stacks differ).
 - Whether real API34 devices also withhold the positive button from a11y — likely yes (SystemUI change) but unverified off-AVD.
+
+## Mission-A T0 — API34 chooser layouts (2026-11-22) — PARTIAL (chooser unforceable, documented)
+
+Goal: force the API34 chooser layout (`MediaProjectionConfig.createConfigForUserChoice()`), exercise entire-screen + app-picker, capture on both.
+
+### What was forced & verified
+- `chooser` payload field added: `CommandLink` → `ConsentActivity.EXTRA_CHOOSER` → `mpm.createScreenCaptureIntent(MediaProjectionConfig.createConfigForUserChoice())` (log: `ConsentA: launch chooser=true`).
+- Classic layout capture re-verified on this exact path: `executed frames=2/2`, auto-accept `masked-confirm gesture tap x=867 y=1456 visibleMs=505`.
+
+### Selectors per layout
+| Layout | Title | Confirm | Cancel | Notes |
+|---|---|---|---|---|
+| Classic AlertDialog (ONLY layout this build renders) | `android:id/alertTitle` "Start recording or casting with X?" | `android:id/button1` "Start now" [715,1373][970,1505] — **a11y-masked**, mirror-tap | `android:id/button3` "Cancel" [110,1373][316,1505] | verified capture |
+| Chooser (unrenderable here) | `screen_share_dialog_title` | `screen_share_mode_spinner` with "Entire screen"/"A single app" options; app picker = `MediaProjectionAppSelectorActivity` (`media_projection_app_selector.xml`, `media_projection_recent_tasks_recycler`) | — | resources/strings exist in SystemUIGoogle.apk; `WormA11y` CONFIRM/ENTIRE label lists already cover it |
+
+### Why unforceable (evidence, dexdump of SystemUIGoogle.apk)
+1. `MediaProjectionPermissionActivity` **never reads** `EXTRA_MEDIA_PROJECTION_CONFIG` — no `getParcelableExtra` in the class; `createConfigForUserChoice()` is a no-op on this build → classic dialog rendered even with `chooser=true` (verified live).
+2. App-picker path exists but is gated by unreleased aconfig flag `WM_ENABLE_PARTIAL_SCREEN_SHARING`; overrides tried: `device_config put systemui wm_enable_partial_screen_sharing true`, `setprop persist.sysui.flag.wm_enable_partial_screen_sharing true`, `setprop persist.sysui.flag.rel 0` (+ SystemUI restart each time) — dialog stayed classic (release-mode build `exp_flag_release=true` ignores overrides).
+3. `MediaProjectionAppSelectorActivity` is `exported=false` + `permission=MANAGE_MEDIA_PROJECTION` (signature) → cannot be launched directly.
+→ **KNOWN-UNKNOWN**: chooser layout reachable only on builds/images shipping the flag on (e.g. stock Pixel API34 QPR or API35+ images) — none available offline on x86_64.
