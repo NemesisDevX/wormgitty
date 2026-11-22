@@ -30,7 +30,16 @@ class ProjectionFgs : Service() {
             .setContentTitle("")
             .build()
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            // The android:project_media op lands asynchronously after the
+            // consent result — a fast caller can win the race and get a
+            // SecurityException here. Swallow + stopSelf; CommandLink retries
+            // once. Never crash the process for a timing edge.
+            try {
+                startForeground(ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } catch (se: SecurityException) {
+                android.util.Log.w("ProjectionFgs", "op not granted yet: ${se.message}")
+                stopSelf()
+            }
         } else {
             startForeground(ID, notif)
         }

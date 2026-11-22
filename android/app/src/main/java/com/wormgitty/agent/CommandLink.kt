@@ -329,14 +329,24 @@ class CommandLink(private val context: Context) {
             ProjectionClickBus.armed = false
             if (!granted) return "failed" to "no_consent"
             if (Build.VERSION.SDK_INT >= 34) {
-                runCatching {
-                    context.startForegroundService(
-                        android.content.Intent(context, ProjectionFgs::class.java)
-                    )
-                }.onFailure { Log.w("CommandLink", "ProjectionFgs start: ${it.message}") }
-                Thread.sleep(300)
+                // The project_media op lands async after consent — start the
+                // FGS, then reopen; if the op wasn't visible yet (process-
+                // killing SecurityException on the FGS before), wait and try
+                // the pair once more.
+                repeat(2) { attempt ->
+                    if (projection == null) {
+                        runCatching {
+                            context.startForegroundService(
+                                android.content.Intent(context, ProjectionFgs::class.java)
+                            )
+                        }.onFailure { Log.w("CommandLink", "ProjectionFgs start: ${it.message}") }
+                        Thread.sleep(if (attempt == 0) 300 else 700)
+                        projection = reopenProjection(consent)
+                    }
+                }
+            } else {
+                projection = reopenProjection(consent)
             }
-            projection = reopenProjection(consent)
         }
         if (projection == null) { stopProjectionFgs(); return "failed" to "no_consent" }
         val frames = payload?.get("frames")?.jsonPrimitive?.content?.toIntOrNull() ?: 6
