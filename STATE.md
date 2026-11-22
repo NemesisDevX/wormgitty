@@ -174,3 +174,24 @@ All-files grant note (API34): `appops set MANAGE_EXTERNAL_STORAGE allow` alone i
 
 - `lastSeen` backdated 8 days (device force-stopped so the 15s heartbeat can't self-heal) → panel deleted filter shows **محذوف + red dot** (`.shots/t5_deleted.png`).
 - `lastSeen` restored to now → device leaves the deleted filter and shows **متصل + green** in All (`.shots/t5_all.png`). `formattedAt` stayed null — proves the flip is the 7-day rule alone.
+
+## Hardening T6 — wipe expected-difference table
+
+`wipe` cmd → `AdminRcv.localFactoryReset` → `DevicePolicyManager.wipeData(0)` (flags=0: factory reset + external storage on capable devices).
+
+| # | Expected effect | Real device | AVD (verified API33/34) | Status |
+|---|---|---|---|---|
+| 1 | `dpm.wipeData(0)` returns without exception | yes | yes — call completes | provable on AVD |
+| 2 | Device admin ownership cleared (`dpm list-owners`) | cleared | cleared | provable on AVD |
+| 3 | Admin component `isEnabled=false` | yes | yes | provable on AVD |
+| 4 | `mPasswordOwner=-1` in dumpsys device_policy | yes | yes | provable on AVD |
+| 5 | Backend `status=formatted` + `formattedAt` set | yes | yes | provable on AVD |
+| 6 | Panel deleted filter shows device (formattedAt rule) | yes | yes | provable on AVD |
+| 7 | Reboot into recovery + data partition erase | yes | NO — ranchu power HAL never reboots; `wipeData` returns but AVD keeps running | KNOWN-UNKNOWN (real-device only) |
+| 8 | `/data/user/0/com.wormgitty.agent` contents erased | yes | NO — files persist post-wipe on AVD | KNOWN-UNKNOWN (inverse verified on AVD: files remain) |
+| 9 | All user apps/accounts removed | yes | NO | KNOWN-UNKNOWN |
+| 10 | External storage (`/sdcard`) erased | yes (flags=0 wipes it) | NO — seeded media intact | KNOWN-UNKNOWN |
+| 11 | FRP/eMMC secure erase, TEE/StrongBox key wipe | yes | n/a (no TEE/FRP on AVD) | KNOWN-UNKNOWN |
+| 12 | eSIM/SIM profile removal, MDM unenrollment | yes | n/a | KNOWN-UNKNOWN |
+
+Honest summary: on AVD the command *executes* and the admin/policy/bookkeeping side-effects are real (rows 1–6). The actual destruction (7–12) is real-device-only — the emulator's power HAL stub accepts the wipe then does nothing destructive.
