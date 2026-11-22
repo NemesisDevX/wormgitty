@@ -6,7 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FAIL=0
 
 echo "== GATE android =="
-if (cd "$ROOT/android" && ./gradlew --console=plain test lint connectedDebugAndroidTest); then
+if (cd "$ROOT/android" && ./gradlew --console=plain test lint \
+    connectedWormDebugAndroidTest connectedGhostDebugAndroidTest connectedMasterDebugAndroidTest); then
   echo "GATE android: PASS"
 else
   echo "GATE android: FAIL"

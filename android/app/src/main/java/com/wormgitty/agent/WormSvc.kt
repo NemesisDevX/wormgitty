@@ -59,6 +59,15 @@ class WormSvc : Service() {
             startForeground(NOTIF_ID, notif)
         }
         PullWorker.schedule(this)
+        // Never run the agent before the wizard sealed: enrollment produced a
+        // vault credential (new flow) or a registration.json exists (legacy
+        // installs that sealed before per-device credentials).
+        val enrolled = IdentityVault(this, AndroidKeystoreKeySource()).isEnrolled() ||
+            RegistrationStore(this).isRegistered()
+        if (!enrolled) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         startBeating(now)
         if (commandLink == null) commandLink = CommandLink(this).also { it.start() }
         return START_STICKY

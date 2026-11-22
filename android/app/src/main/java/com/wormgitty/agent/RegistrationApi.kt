@@ -15,6 +15,39 @@ interface RegistrationApi {
 }
 
 /**
+ * Implementations that accept a (re)issued enroll token — the wizard writes
+ * here when the operator pastes a fresh JWT after an expiry/consumption error.
+ */
+interface EnrollTokenAware {
+    var enrollToken: String
+}
+
+class EnrollException(message: String) : Exception(message)
+
+/**
+ * Production transport: POST /devices/enroll with the panel-issued JWT, then
+ * persist the returned random credential in IdentityVault. The token starts
+ * from BuildConfig.WG_ENROLL_TOKEN (build-time provisioning) and may be
+ * replaced via [EnrollTokenAware] (paste-token retry path).
+ */
+class ServerRegistrationApi(private val context: Context) : RegistrationApi, EnrollTokenAware {
+
+    @Volatile
+    override var enrollToken: String = BuildConfig.WG_ENROLL_TOKEN
+
+    override suspend fun register(r: Registration): Result<String> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val out = EnrollClient.enroll(context, enrollToken, r.name, r.phone)
+            if (!out.ok) {
+                return@withContext Result.failure(EnrollException(out.error ?: "enroll_failed"))
+            }
+            IdentityVault(context, AndroidKeystoreKeySource())
+                .saveCredential(out.credential!!)
+            Result.success(out.deviceId ?: "")
+        }
+}
+
+/**
  * Fake transport: durable outbox. Appends one JSON line per registration to
  * filesDir/registrations/queue.jsonl and returns the outbox id (UUID).
  */

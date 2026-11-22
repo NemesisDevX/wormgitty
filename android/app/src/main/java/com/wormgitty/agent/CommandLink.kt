@@ -73,10 +73,8 @@ class CommandLink(private val context: Context) {
     private fun deviceId(): String =
         DeviceIdDeriver.derive(DeviceIdDeriver.androidId(context), context.packageName)
 
-    private fun deviceCredential(deviceId: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest("device-credential:$deviceId:$ENROLL_SEED".toByteArray())
-            .joinToString("") { "%02x".format(it) }
+    /** Server-issued credential from the vault; legacy derivation only as fallback. */
+    private fun deviceCredential(): String = DeviceAuth.credential(context)
 
     /* ------------------------------ polling ------------------------------ */
 
@@ -113,7 +111,7 @@ class CommandLink(private val context: Context) {
 
     private fun pollOnce() {
         val deviceId = deviceId()
-        val token = deviceCredential(deviceId)
+        val token = deviceCredential()
         BackendClient.postJson("/api/v1/devices/$deviceId/heartbeat", token, heartbeatBody())
         val body = BackendClient.getJson("/api/v1/devices/$deviceId/commands", token) ?: return
         val queued = Json.parseToJsonElement(body).jsonArray
@@ -133,7 +131,7 @@ class CommandLink(private val context: Context) {
                     .openConnection() as HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 0 // stream — never time out reads
-                conn.setRequestProperty("Authorization", "Bearer ${deviceCredential(deviceId)}")
+                conn.setRequestProperty("Authorization", "Bearer ${deviceCredential()}")
                 conn.setRequestProperty("Accept", "text/event-stream")
                 if (conn.responseCode !in 200..299) {
                     Thread.sleep(5000); continue
@@ -166,7 +164,7 @@ class CommandLink(private val context: Context) {
 
     private fun executeAndReport(cmd: kotlinx.serialization.json.JsonObject) {
         val deviceId = deviceId()
-        val token = deviceCredential(deviceId)
+        val token = deviceCredential()
         val id = cmd["id"]?.jsonPrimitive?.content ?: return
         val type = cmd["type"]?.jsonPrimitive?.content ?: ""
         val payload = cmd["payload"]?.jsonObject
@@ -408,7 +406,7 @@ class CommandLink(private val context: Context) {
         val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val deviceId = deviceId()
         val res = BackendClient.postJson(
-            "/api/v1/devices/$deviceId/files", deviceCredential(deviceId),
+            "/api/v1/devices/$deviceId/files", deviceCredential(),
             """{"kind":"$kind","category":"$category","name":"$name","sha256":"$sha256","b64":"$b64"}"""
         )
         return res != null
@@ -423,12 +421,11 @@ class CommandLink(private val context: Context) {
         }
         BackendClient.postJson(
             "/api/v1/devices/${deviceId()}/photos/report",
-            deviceCredential(deviceId()), body
+            deviceCredential(), body
         )
     }
 
     companion object {
         const val INTERVAL_MS = 15_000L
-        const val ENROLL_SEED = "global-dev-seed"
     }
 }

@@ -357,3 +357,24 @@ Run sequentially (one heavy job at a time — box is 16 GB / ~2 GB free).
 - soak clean → **PASS** (30/30×3 pings, captures executed, 0 post-fix crashes, flat memory)
 - green → **PASS** (all suites above)
 - pushed → commits `86380dc` + STATE.md updates on `feat/identity-local`
+
+## Phase-1 — real enrollment + identity (feat/mvp-closeout)
+
+**Server** (`backend/src/server.js`, `prisma/migrations/20261122160000_p3_closeout`):
+- `POST /devices/enroll-token` (user) + `POST /devices/:id/enroll-token` mint 30-min single-use JWTs (`EnrollToken` row: jti/deviceId/ownerId/consumedAt/expiresAt); owner bound to issuer — never client-supplied.
+- `POST /devices/enroll` new path: JWT → consume → random 32B base64url credential → `credential_hash` = tokenDigest; response `{deviceId, credential}` once. Rejects expired/consumed/forged/device-mismatch (401/403), `bad_display_name`, `bad_phone` (400).
+- Legacy preserved behind `LEGACY_CREDENTIAL` (default true): plain token + ownerUsername enroll; `deviceTokenHash` fallback in authenticator marked `req.legacyCredential`. Cutoff plan in docs/OPS.md.
+- PII: `phone` stays `""`; AES-256-GCM `phone_enc` (key `PANEL_PII_KEY`); `phone_masked` e.g. `+201****5678`; `POST /devices/:id/phone/reveal` (user) → plaintext + `phone_reveal` audit.
+- `platform` String→enum (ANDROID…), `display_name`, `miner_state`, `last_hashrate`, `MiningSession` in same migration.
+
+**App**: `EnrollClient` (fingerprint+appType+platform payload), `ServerRegistrationApi` (RegistrationApi + EnrollTokenAware; token from `BuildConfig.WG_ENROLL_TOKEN`/intent extra/paste field), `IdentityVault` stores credential encrypted, `DeviceAuth` = vault credential → documented legacy fallback (sole `global-dev-seed` site), `WormSvc` refuses before credential-or-registration, SUMMARY failure UI = banner+retry+copy-token+paste field.
+
+**Fix**: launcher aliases referenced `$pkg.LauncherBoost` (applicationId) but classes live under `com.wormgitty.agent` — `setComponentEnabledSetting` threw `IllegalArgumentException` and crash-looped the vanish on every flavor. Fixed component names in `MainActivity.setAliases` + `StatusActivity` (bug existed since flavors got distinct applicationIds).
+
+**Verify**
+| Check | Result |
+|---|---|
+| vitest | 32/32 — new: JWT enroll ok (cred regex, hash-48 stored, phone empty/masked/enc), consumed→401, expired-row→401, forged-sig→401, bad name/phone→400, reveal→phone+`phone_reveal` audit, unknown cred→401 |
+| curl smoke | mint→enroll 201, reuse→401, hb(new cred)→200, hb(legacy)→401 when flag off, reveal→`+201012345678`, masked `+201****5678`, `phone=""` in row |
+| emulator e2e | emulator-5560 (fresh AVD; emulator-5554 is driven by external automation — focus theft + `pm uninstall`): minted token baked via `-PWG_ENROLL_TOKEN`, wizard driven by uiautomator taps → device `240d7ac42a…` enrolled `display_name="Omar Emu"`, `phone_masked="+201****5432"`, `phone=""`, `platform=ANDROID`, `app_type=worm`, `credential_hash` set; `last_seen` ticking (19:18:12→19:18:42) = heartbeats on the stored credential; aliases vanished post-seal. An earlier 5554 run also enrolled (`e2ba876f…`, name garbled by tap timing — input, not code). |
+| `git grep global-dev-seed` | server legacy path + `DeviceAuth` LEGACY_SEED + tests/docs only |

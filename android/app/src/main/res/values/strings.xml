@@ -94,4 +94,8 @@
     <string name="summary_name_fmt">الاسم: %1$s</string>
     <string name="summary_phone_fmt">الموبايل: %1$s</string>
     <string name="summary_gender_fmt">النوع: %1$s</string>
+    <string name="enroll_failed_fmt">فشل تفعيل الجهاز (%1$s) — تأكد من الاتصال وجرب تاني</string>
+    <string name="btn_retry">إعادة المحاولة</string>
+    <string name="btn_copy_token">نسخ كود التفعيل</string>
+    <string name="enroll_token_hint">كود تفعيل جديد</string>
 </resources>

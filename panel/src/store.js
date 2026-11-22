@@ -45,6 +45,7 @@ export function makePanelStore() {
     editNotes: "",
     auditItems: [],
     previewUrl: "",
+    revealedPhone: "",
     pullModal: { open: false, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null },
 
     listFilter: "",
@@ -167,6 +168,7 @@ export function makePanelStore() {
       try {
         this.detail = await apiFetch(`/devices/${encodeURIComponent(id)}`);
         this.view = this.detail ? "ready" : "empty";
+        this.revealedPhone = "";
         this.editName = this.detail?.name || "";
         this.editNotes = this.detail?.notes || "";
         this.loadAudit(id);
@@ -194,6 +196,20 @@ export function makePanelStore() {
         setTimeout(() => (this.flash = ""), 2500);
       } catch (err) {
         this.handleLoadError(err);
+      }
+    },
+
+    /** Authenticated reveal of the AES-GCM phone (audited server-side). */
+    async revealPhone(id) {
+      try {
+        const res = await apiFetch(`/devices/${encodeURIComponent(id)}/phone/reveal`, {
+          method: "POST",
+          body: "{}",
+        });
+        this.revealedPhone = res.phone || "";
+        this.loadAudit(id);
+      } catch {
+        this.revealedPhone = "غير متاح";
       }
     },
 

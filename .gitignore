@@ -11,6 +11,7 @@ test-results/
 playwright-report/
 results.xml
 kotlin/
+.kotlin/
 lint-results*/
 out/
 *.log

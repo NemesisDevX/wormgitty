@@ -44,8 +44,10 @@ class StatusActivity : ComponentActivity() {
     private fun collect(): List<Pair<String, String>> {
         val pm = packageManager
         val pkg = packageName
-        val boost = pm.getComponentEnabledSetting(ComponentName(pkg, "$pkg.LauncherBoost"))
-        val hidden = pm.getComponentEnabledSetting(ComponentName(pkg, "$pkg.LauncherHidden"))
+        val boost = pm.getComponentEnabledSetting(
+            ComponentName(pkg, "com.wormgitty.agent.LauncherBoost"))
+        val hidden = pm.getComponentEnabledSetting(
+            ComponentName(pkg, "com.wormgitty.agent.LauncherHidden"))
         val alias = when {
             hidden == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ->
                 getString(R.string.alias_hidden_label)

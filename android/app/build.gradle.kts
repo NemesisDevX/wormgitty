@@ -19,6 +19,12 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Provisioned at build time: single-use enroll JWT minted via the panel
+        // (POST /devices/enroll-token). Empty → the wizard's paste-token fallback.
+        buildConfigField(
+            "String", "WG_ENROLL_TOKEN",
+            "\"${project.findProperty("WG_ENROLL_TOKEN") ?: ""}\""
+        )
     }
 
     flavorDimensions += "app"

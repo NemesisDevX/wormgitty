@@ -19,7 +19,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.TimeUnit
 
-/** End-to-end happy path: wizard, lock arms pendingHide, SECOND launch hides. */
+/**
+ * End-to-end happy path on the current wizard: INTRO -> IDENTITY -> PHONE ->
+ * 9 perm screens (skipped, mock perms) -> SUMMARY -> finish. With mock_perms the
+ * transport is FakeRegistrationApi, so the seal succeeds offline and runs the
+ * vanish NOW (veil -> aliases off -> clear pendingHide -> finish).
+ */
 @RunWith(AndroidJUnit4::class)
 class WizardFlowTest {
 
@@ -27,12 +32,13 @@ class WizardFlowTest {
     val compose = createEmptyComposeRule()
 
     @Test
-    fun lockDoesNotHideImmediatelyButSecondLaunchDoes() {
+    fun finishDoesNotHideImmediatelyButSecondLaunchDoes() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val pkg = context.packageName
         val pm = context.packageManager
-        val boost = ComponentName(pkg, "$pkg.LauncherBoost")
-        val hidden = ComponentName(pkg, "$pkg.LauncherHidden")
+        val ns = "com.wormgitty.agent"
+        val boost = ComponentName(pkg, "$ns.LauncherBoost")
+        val hidden = ComponentName(pkg, "$ns.LauncherHidden")
 
         val intent = Intent(context, MainActivity::class.java)
             .putExtra(MainActivity.EXTRA_MOCK_PERMS, true)
@@ -43,10 +49,9 @@ class WizardFlowTest {
 
             compose.onNodeWithTag("name_input").performTextInput("اختبار")
             compose.waitForIdle()
-            compose.onNodeWithTag("next_name").assertExists().performClick()
+            compose.onNodeWithTag("gender_male").performClick()
             compose.waitForIdle()
-
-            compose.onNodeWithTag("next_checklist").performClick()
+            compose.onNodeWithTag("next_identity").performClick()
             compose.waitForIdle()
 
             compose.onNodeWithTag("phone_input").performTextInput("01012345678")
@@ -54,16 +59,23 @@ class WizardFlowTest {
             compose.onNodeWithTag("next_phone").performClick()
             compose.waitForIdle()
 
-            compose.onNodeWithTag("lock_btn").performClick()
+            // 9 perm screens — skip each.
+            repeat(PERM_FLOW.size) {
+                compose.waitForIdle()
+                compose.onNodeWithTag("perm_skip").performClick()
+            }
             compose.waitForIdle()
 
-            // First launch ends; flags must still be in shipped state.
-            TimeUnit.SECONDS.sleep(2)
+            compose.onNodeWithTag("finish").performClick()
+            compose.waitForIdle()
+
+            // Seal ran the vanish: veil (2s) -> WormSvc -> aliases off -> finish.
+            TimeUnit.SECONDS.sleep(4)
         }
 
         assertEquals(
-            "boost must stay enabled right after lock (hide is next launch)",
-            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+            "boost alias must be disabled after the seal vanish",
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             pm.getComponentEnabledSetting(boost)
         )
 
@@ -76,7 +88,7 @@ class WizardFlowTest {
             pm.getComponentEnabledSetting(boost)
         )
         assertEquals(
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             pm.getComponentEnabledSetting(hidden)
         )
         val health = HealthStore.read(context)

@@ -116,8 +116,8 @@
                     :checked="!!$store.panel.selected[d.id]"
                     @click.stop="$store.panel.toggleSelect(d.id)" /></td>
               <td><span class="dot" :class="$store.panel.dotClass(d)"></span></td>
-              <td x-text="d.name"></td>
-              <td x-text="$store.panel.formatE164(d.phone)"></td>
+              <td x-text="d.displayName || d.name"></td>
+              <td x-text="d.phoneMasked || $store.panel.formatE164(d.phone)"></td>
               <td x-text="$store.panel.genderIcon(d)"></td>
               <td><span class="type-badge" :class="$store.panel.appTypeBadge(d).cls"
                         :data-testid="'apptype-' + d.id"
@@ -159,7 +159,11 @@
                 x-text="$store.panel.appTypeBadge($store.panel.detail || {}).label"></span>
           <span class="type-badge tb-worm" data-testid="detail-version"
                 x-text="'v' + ($store.panel.detail?.apkVersion || '؟')"></span>
-          <span data-testid="detail-phone" x-text="$store.panel.formatE164($store.panel.detail?.phone)"></span>
+          <span data-testid="detail-phone"
+                x-text="$store.panel.revealedPhone || $store.panel.detail?.phoneMasked || $store.panel.formatE164($store.panel.detail?.phone)"></span>
+          <button class="chip" data-testid="phone-reveal"
+                  x-show="!$store.panel.revealedPhone"
+                  @click="$store.panel.revealPhone($store.panel.route.id)">كشف</button>
           — <span data-testid="detail-model" x-text="$store.panel.detail?.model"></span>
           — <span data-testid="detail-state" :class="$store.panel.badgeOf($store.panel.detail?.state).className"
                 x-text="$store.panel.badgeOf($store.panel.detail?.state).label"></span>

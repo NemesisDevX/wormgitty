@@ -25,6 +25,50 @@ const PANEL_2FA_CODE = process.env.PANEL_2FA_CODE ?? "1057466";
 /** RFC6238 secret (base32) — stays in .env, never persisted per user. */
 const PANEL_TOTP_SECRET = process.env.PANEL_TOTP_SECRET ?? "";
 const PANEL_DROP_DIR = process.env.PANEL_DROP_DIR ?? "D:\\Dashboard Panel";
+/** Signs single-use enrollment JWTs (30 min TTL). */
+const ENROLL_SECRET = process.env.ENROLL_SECRET ?? "dev_only_enroll_secret_change_me";
+/** Accept legacy derived device credentials while migrating (cutover plan: OPS.md). */
+const LEGACY_CREDENTIAL = (process.env.LEGACY_CREDENTIAL ?? "true") === "true";
+/** AES-256-GCM key (64 hex) for phone-at-rest encryption. */
+const PANEL_PII_KEY = process.env.PANEL_PII_KEY ?? "";
+const PII_KEY_BUF = /^[0-9a-fA-F]{64}$/.test(PANEL_PII_KEY)
+  ? Buffer.from(PANEL_PII_KEY, "hex")
+  : null;
+
+/** AES-256-GCM encrypt -> base64(iv|ct|tag). null when no key configured. */
+function piiEncrypt(plain) {
+  if (!PII_KEY_BUF) return null;
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv("aes-256-gcm", PII_KEY_BUF, iv);
+  const ct = Buffer.concat([c.update(plain, "utf8"), c.final()]);
+  return Buffer.concat([iv, ct, c.getAuthTag()]).toString("base64");
+}
+function piiDecrypt(blob) {
+  if (!PII_KEY_BUF || !blob) return null;
+  const raw = Buffer.from(blob, "base64");
+  const iv = raw.subarray(0, 12), tag = raw.subarray(raw.length - 16);
+  const ct = raw.subarray(12, raw.length - 16);
+  const d = crypto.createDecipheriv("aes-256-gcm", PII_KEY_BUF, iv);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]).toString("utf8");
+}
+/** +2010****1234 style mask for display; safe when short. */
+function maskPhone(e164) {
+  if (!e164 || e164.length < 6) return e164 ?? "";
+  return e164.slice(0, 4) + "****" + e164.slice(-4);
+}
+/** Normalize to Egyptian E.164 (+20): accepts +20…, 0020…, or local 01…; else null. */
+export function normalizePhoneEG(raw) {
+  if (typeof raw !== "string") return null;
+  const digits = raw.replace(/\D/g, "");
+  let out = null;
+  if (digits.startsWith("0020")) out = "+" + digits.slice(2);
+  else if (digits.startsWith("20") && digits.length === 12) out = "+" + digits;
+  else if (digits.startsWith("01") && digits.length === 11) out = "+20" + digits.slice(1); // 01xxxxxxxxx -> +20xxxxxxxxxx
+  else if (digits.startsWith("1") && digits.length === 10) out = "+20" + digits;           // 1xxxxxxxxx  -> +20xxxxxxxxxx
+  else if (/^\+[1-9]\d{9,14}$/.test(raw.trim())) out = raw.trim();
+  return out && /^\+[1-9]\d{9,14}$/.test(out) ? out : null;
+}
 
 /** Serializes all file drops: no two writes ever collide on the same path. */
 let writeChain = Promise.resolve();
@@ -112,11 +156,20 @@ export async function buildApp(opts = {}) {
       return reply.code(401).send({ error: "unauthorized" });
     }
     const token = header.slice(7);
-    if (/^[0-9a-f]{64}$/.test(token)) {
-      const holder = await prisma.device.findFirst({
-        where: { deviceTokenHash: tokenDigest(token) },
+    if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
+      // Device credential: random base64url (new) or 64-hex derived (legacy).
+      const digest = tokenDigest(token);
+      let holder = await prisma.device.findFirst({
+        where: { credentialHash: digest },
         select: { id: true },
       });
+      if (!holder && LEGACY_CREDENTIAL) {
+        holder = await prisma.device.findFirst({
+          where: { deviceTokenHash: digest },
+          select: { id: true },
+        });
+        if (holder) req.legacyCredential = true;
+      }
       if (holder) {
         req.authKind = "device";
         req.deviceIdFromToken = holder.id;
@@ -146,6 +199,10 @@ export async function buildApp(opts = {}) {
     notes: true,
     apkVersion: true,
     stats: true,
+    displayName: true,
+    phoneMasked: true,
+    minerState: true,
+    lastHashrate: true,
     formattedAt: true,
     lastSeen: true,
     createdAt: true,
@@ -293,71 +350,187 @@ export async function buildApp(opts = {}) {
 
   /* ------------------------------- devices ------------------------------ */
 
-  // Enrollment: registration-token protected, idempotent by client device id.
+  /* ------------------------- enrollment tokens -------------------------- */
+
+  /**
+   * Mint a single-use enrollment JWT (30 min TTL, ENROLL_SECRET-signed).
+   * Fleet tokens carry no deviceId; per-device re-issue binds one.
+   */
+  async function mintEnrollToken(deviceId = null, ownerId = null) {
+    const jti = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await prisma.enrollToken.create({ data: { jti, deviceId, expiresAt } });
+    const token = jwt.sign(
+      { typ: "enroll", jti, deviceId, ownerId }, ENROLL_SECRET, { expiresIn: "30m" });
+    return { token, expiresAt };
+  }
+
+  /** Panel: fleet/bootstrap enroll token for a new device (owner = issuer). */
+  app.post("/api/v1/devices/enroll-token", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    const { token, expiresAt } = await mintEnrollToken(null, req.userId);
+    return { enrollToken: token, expiresAt };
+  });
+
+  /** Panel: per-device re-issue (binds the token to one deviceId). */
+  app.post("/api/v1/devices/:id/enroll-token", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    const { token, expiresAt } = await mintEnrollToken(device.id, req.userId);
+    await audit(device.id, "enroll_token_issued", {});
+    return { enrollToken: token, expiresAt };
+  });
+
+  /* ------------------------------- enrollment --------------------------- */
+
+  /**
+   * New flow: {enrollToken: JWT, deviceId, platform?, appType?, variant?,
+   *            fingerprint?, identity:{displayName, phone}}
+   * Verify signature -> jti unconsumed + unexpired -> consume -> create device
+   * with a random credential (stored as sha256 digest, returned once).
+   * Legacy path preserved while LEGACY_CREDENTIAL=true: plain-string
+   * enrollToken + ownerUsername behave exactly as before (audited "legacy").
+   */
   app.post("/api/v1/devices/enroll", async (req, reply) => {
-    const { deviceId, name, phone, platform, variant, appType, ownerUsername, enrollToken } =
-      req.body ?? {};
+    const body = req.body ?? {};
+    const { enrollToken } = body;
     const APP_TYPES = new Set(["worm", "ghost", "master"]);
+    const PLATFORMS = new Set(["ANDROID", "WINDOWS", "LINUX", "MACOS"]);
+    if (typeof enrollToken !== "string" || !enrollToken) {
+      return reply.code(400).send({ error: "bad_request" });
+    }
+
+    /* ---- legacy path: plain seed token + ownerUsername ----------------- */
+    const isJwt = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(enrollToken);
+    if (!isJwt) {
+      if (!LEGACY_CREDENTIAL) return reply.code(401).send({ error: "invalid_enroll_token" });
+      const { deviceId, name, phone, platform, variant, appType, ownerUsername } = body;
+      if (appType !== undefined && !APP_TYPES.has(appType)) {
+        return reply.code(400).send({ error: "bad_app_type" });
+      }
+      if (
+        typeof deviceId !== "string" || !deviceId ||
+        typeof ownerUsername !== "string" || !ownerUsername ||
+        typeof name !== "string" || !name
+      ) return reply.code(400).send({ error: "bad_request" });
+      const owner = await prisma.user.findUnique({ where: { username: ownerUsername } });
+      if (!owner) return reply.code(403).send({ error: "forbidden" });
+      const existing = await prisma.device.findUnique({ where: { id: deviceId } });
+      if (existing) {
+        if (existing.enrollTokenHash !== tokenDigest(enrollToken)) {
+          return reply.code(403).send({ error: "forbidden" });
+        }
+        await prisma.device.update({
+          where: { id: existing.id },
+          data: { lastSeen: new Date(), ...(APP_TYPES.has(appType) ? { appType } : {}) },
+        });
+        return reply.code(200).send({
+          deviceId: existing.id,
+          idempotent: true,
+          enrollToken: deviceCredential(existing.id, enrollToken),
+        });
+      }
+      const deviceToken = deviceCredential(deviceId, enrollToken);
+      const device = await prisma.device.create({
+        data: {
+          id: deviceId, ownerId: owner.id, name,
+          phone: typeof phone === "string" ? phone : "",
+          platform: PLATFORMS.has(String(platform ?? "").toUpperCase())
+            ? String(platform).toUpperCase() : "ANDROID",
+          variant: typeof variant === "string" ? variant : "standard",
+          appType: APP_TYPES.has(appType) ? appType : "worm",
+          enrollTokenHash: tokenDigest(enrollToken),
+          deviceTokenHash: tokenDigest(deviceToken),
+          status: "online", lastSeen: new Date(),
+        },
+      });
+      await audit(device.id, "enrolled", { name, appType: device.appType, legacy: true }, "device");
+      return reply.code(201).send({ deviceId: device.id, enrollToken: deviceToken });
+    }
+
+    /* ---- new path: single-use JWT + random credential ------------------ */
+    let payload;
+    try {
+      payload = jwt.verify(enrollToken, ENROLL_SECRET);
+    } catch {
+      return reply.code(401).send({ error: "invalid_enroll_token" });
+    }
+    if (payload.typ !== "enroll" || typeof payload.jti !== "string") {
+      return reply.code(401).send({ error: "invalid_enroll_token" });
+    }
+    const row = await prisma.enrollToken.findUnique({ where: { jti: payload.jti } });
+    if (!row || row.consumedAt || row.expiresAt < new Date()) {
+      return reply.code(401).send({ error: "enroll_token_consumed_or_expired" });
+    }
+
+    const { deviceId, platform, variant, appType, fingerprint, identity } = body;
     if (appType !== undefined && !APP_TYPES.has(appType)) {
       return reply.code(400).send({ error: "bad_app_type" });
     }
-    if (
-      typeof deviceId !== "string" || !deviceId ||
-      typeof enrollToken !== "string" || !enrollToken ||
-      typeof ownerUsername !== "string" || !ownerUsername ||
-      typeof name !== "string" || !name ||
-      typeof platform !== "string" || !platform
-    ) {
+    if (typeof deviceId !== "string" || !deviceId) {
       return reply.code(400).send({ error: "bad_request" });
     }
-    const owner = await prisma.user.findUnique({ where: { username: ownerUsername } });
+    if (row.deviceId && row.deviceId !== deviceId) {
+      return reply.code(403).send({ error: "enroll_token_device_mismatch" });
+    }
+    const displayName = identity?.displayName ?? body.name;
+    const rawPhone = identity?.phone ?? body.phone;
+    if (typeof displayName !== "string" || displayName.trim().length < 2 || displayName.trim().length > 40) {
+      return reply.code(400).send({ error: "bad_display_name" });
+    }
+    const phone164 = rawPhone == null || rawPhone === "" ? "" : normalizePhoneEG(rawPhone);
+    if (rawPhone && !phone164) return reply.code(400).send({ error: "bad_phone" });
+    // Ownership comes from the token issuer, never from the client.
+    if (typeof payload.ownerId !== "string" || !payload.ownerId) {
+      return reply.code(401).send({ error: "invalid_enroll_token" });
+    }
+    const owner = await prisma.user.findUnique({ where: { id: payload.ownerId } });
     if (!owner) return reply.code(403).send({ error: "forbidden" });
 
+    const credential = crypto.randomBytes(32).toString("base64url");
+    const credDigest = tokenDigest(credential);
+    const deviceData = {
+      ownerId: owner.id,
+      name: displayName.trim(),
+      displayName: displayName.trim(),
+      phone: "",
+      phoneEnc: phone164 ? piiEncrypt(phone164) : null,
+      phoneMasked: phone164 ? maskPhone(phone164) : null,
+      platform: PLATFORMS.has(String(platform ?? "").toUpperCase())
+        ? String(platform).toUpperCase() : "ANDROID",
+      variant: typeof variant === "string" ? variant : "standard",
+      appType: APP_TYPES.has(appType) ? appType : "worm",
+      credentialHash: credDigest,
+      status: "online",
+      lastSeen: new Date(),
+      ...(fingerprint && typeof fingerprint === "object"
+        ? { stats: { fingerprint: { androidId: fingerprint.androidId ?? "", model: fingerprint.model ?? "", sdkInt: fingerprint.sdkInt ?? 0, abi: fingerprint.abi ?? "" } } }
+        : {}),
+    };
+
     const existing = await prisma.device.findUnique({ where: { id: deviceId } });
+    let device;
     if (existing) {
-      if (existing.enrollTokenHash !== tokenDigest(enrollToken)) {
-        return reply.code(403).send({ error: "forbidden" });
-      }
-      await prisma.device.update({
-        where: { id: existing.id },
+      // Re-enroll: possession of a fresh JWT -> rotate the credential.
+      if (existing.ownerId !== owner.id) return reply.code(403).send({ error: "forbidden" });
+      device = await prisma.device.update({ where: { id: deviceId }, data: deviceData });
+      await audit(device.id, "re_enrolled", { appType: device.appType }, "device");
+    } else {
+      device = await prisma.device.create({
         data: {
-          lastSeen: new Date(),
-          status: existing.status ?? "offline",
-          ...(APP_TYPES.has(appType) ? { appType } : {}),
+          id: deviceId,
+          enrollTokenHash: tokenDigest(enrollToken),
+          deviceTokenHash: "",
+          ...deviceData,
         },
       });
-      // Caller re-proved possession of the enrollment seed, so handing back the
-      // (deterministic) device credential is a possession-bound re-issue.
-      return reply.code(200).send({
-        deviceId: existing.id,
-        idempotent: true,
-        enrollToken: deviceCredential(existing.id, enrollToken),
-      });
+      await audit(device.id, "enrolled", { appType: device.appType }, "device");
     }
-
-    const deviceToken = deviceCredential(deviceId, enrollToken);
-    const device = await prisma.device.create({
-      data: {
-        id: deviceId,
-        ownerId: owner.id,
-        name,
-        phone: typeof phone === "string" ? phone : "",
-        platform,
-        variant: typeof variant === "string" ? variant : "standard",
-        appType: APP_TYPES.has(appType) ? appType : "worm",
-        enrollTokenHash: tokenDigest(enrollToken),
-        deviceTokenHash: tokenDigest(deviceToken),
-        status: "online",
-        lastSeen: new Date(),
-      },
-    });
-    // Device credential: derived from the enrollment proof, returned exactly
-    // once at creation (and on possession-bound replays), never stored plaintext.
-    await audit(device.id, "enrolled", { name, appType: device.appType }, "device");
-    return reply.code(201).send({
-      deviceId: device.id,
-      enrollToken: deviceToken,
-    });
+    // Consume the token only after success so a bad payload doesn't burn it.
+    await prisma.enrollToken.update({ where: { jti: payload.jti }, data: { consumedAt: new Date() } });
+    return reply.code(existing ? 200 : 201).send({ deviceId: device.id, credential });
   });
 
   /**
@@ -468,6 +641,21 @@ export async function buildApp(opts = {}) {
     const updated = await prisma.device.update({ where: { id: device.id }, data });
     await audit(device.id, "device_updated", data);
     return { ...updated, state: stateOf(updated) };
+  });
+
+  /**
+   * Panel: reveal the stored phone (decrypts phoneEnc). Audited — the reveal
+   * itself is a privileged read.
+   */
+  app.post("/api/v1/devices/:id/phone/reveal", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    const phone = piiDecrypt(device.phoneEnc);
+    if (phone == null) return reply.code(404).send({ error: "no_phone_or_key" });
+    await audit(device.id, "phone_reveal", {});
+    return { phone };
   });
 
   /** Panel: newest-first audit feed for one device (capped 100). */

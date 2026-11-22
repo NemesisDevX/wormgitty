@@ -403,3 +403,124 @@ describe("commands endpoints", () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+/* -------------------- phase-1: JWT enrollment -------------------- */
+
+describe("JWT enrollment (phase-1)", () => {
+  async function mintEnrollToken(userToken) {
+    const res = await authPost(userToken, "/api/v1/devices/enroll-token", {});
+    expect(res.statusCode).toBe(200);
+    return res.json().enrollToken;
+  }
+
+  async function jwtEnroll(enrollToken, deviceId, extra = {}) {
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/devices/enroll",
+      payload: {
+        enrollToken,
+        deviceId,
+        platform: "ANDROID",
+        appType: "worm",
+        fingerprint: { androidId: "a", model: "sdk", sdkInt: 34, abi: "x86_64" },
+        identity: { displayName: "Phase One", phone: "01012345678" },
+        ...extra,
+      },
+    });
+  }
+
+  it("enrolls with a valid single-use JWT and returns a random credential", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const res = await jwtEnroll(jwt, "dev-jwt-001");
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.deviceId).toBe("dev-jwt-001");
+    expect(body.credential).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+
+    // Only the hash is persisted; the bearer itself authenticates.
+    const row = await prisma.device.findUnique({ where: { id: "dev-jwt-001" } });
+    expect(row.credentialHash).toMatch(/^[0-9a-f]{48}$/);
+    expect(row.phone).toBe(""); // plaintext phone never stored
+    expect(row.phoneMasked).toBe("+201****5678");
+    expect(row.phoneEnc).toBeTruthy();
+    expect(row.displayName).toBe("Phase One");
+    expect(row.platform).toBe("ANDROID");
+
+    const hb = await app.inject({
+      method: "POST",
+      url: "/api/v1/devices/dev-jwt-001/heartbeat",
+      headers: { authorization: `Bearer ${body.credential}` },
+      payload: { gender: "male", appType: "worm", stats: {} },
+    });
+    expect(hb.statusCode).toBe(200);
+  });
+
+  it("rejects a consumed token on reuse", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const first = await jwtEnroll(jwt, "dev-jwt-consume");
+    expect(first.statusCode).toBe(201);
+    const second = await jwtEnroll(jwt, "dev-jwt-consume2");
+    expect(second.statusCode).toBe(401);
+  });
+
+  it("rejects a token whose DB row expired", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const jti = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString()).jti;
+    await prisma.enrollToken.update({
+      where: { jti },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    const res = await jwtEnroll(jwt, "dev-jwt-expired");
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a forged token (wrong signature)", async () => {
+    const jwtmod = (await import("jsonwebtoken")).default;
+    const forged = jwtmod.sign(
+      { typ: "enroll", jti: "forged-jti", deviceId: null, ownerId: users.alice.id },
+      "not_the_enroll_secret"
+    );
+    const res = await jwtEnroll(forged, "dev-jwt-forged");
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects bad display name and bad phone", async () => {
+    const tok = await login("alice");
+    const badName = await jwtEnroll(await mintEnrollToken(tok), "dev-jwt-badname",
+      { identity: { displayName: "x", phone: "+201012345678" } });
+    expect(badName.statusCode).toBe(400);
+    const badPhone = await jwtEnroll(await mintEnrollToken(tok), "dev-jwt-badphone",
+      { identity: { displayName: "Ok Name", phone: "12345" } });
+    expect(badPhone.statusCode).toBe(400);
+  });
+
+  it("panel reveal returns the decrypted phone and audits it", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    await jwtEnroll(jwt, "dev-jwt-reveal");
+    const res = await authPost(tok, "/api/v1/devices/dev-jwt-reveal/phone/reveal", {});
+    expect(res.statusCode).toBe(200);
+    expect(res.json().phone).toBe("+201012345678");
+    const audit = await prisma.auditEvent.findFirst({
+      where: { deviceId: "dev-jwt-reveal", action: "phone_reveal" },
+    });
+    expect(audit).toBeTruthy();
+  });
+
+  it("rejects an unknown credential and a token minted for another device", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/devices/nonexistent/heartbeat",
+      headers: { authorization: "Bearer " + "A".repeat(43) },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(401);
+    const enroll = await jwtEnroll(jwt, "dev-jwt-mismatch");
+    expect(enroll.statusCode).toBe(201);
+  });
+});

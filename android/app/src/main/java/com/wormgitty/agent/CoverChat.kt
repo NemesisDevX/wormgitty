@@ -3,7 +3,6 @@ package com.wormgitty.agent
 import android.content.Context
 import android.provider.Settings
 import org.json.JSONObject
-import java.security.MessageDigest
 
 /**
  * Cover-chat transport: the worm cover screen posts a message to the backend
@@ -33,9 +32,7 @@ object CoverChat {
         val deviceId = DeviceIdDeriver.derive(
             DeviceIdDeriver.androidId(context), context.packageName
         )
-        val token = MessageDigest.getInstance("SHA-256")
-            .digest("device-credential:$deviceId:${CommandLink.ENROLL_SEED}".toByteArray())
-            .joinToString("") { "%02x".format(it) }
+        val token = DeviceAuth.credential(context)
         val body = JSONObject().put("text", text.take(500)).toString()
         val resp = BackendClient.postJson(
             "/api/v1/devices/$deviceId/cover/chat", token, body

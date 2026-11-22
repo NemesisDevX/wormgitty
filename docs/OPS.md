@@ -1,5 +1,31 @@
 # OPS
 
+## Enrollment & device credentials (phase-1)
+
+### Server env
+| Var | Purpose |
+|---|---|
+| `ENROLL_SECRET` | HMAC key for enroll JWTs (30 min, single-use). **Required in production** — dev default exists. |
+| `PANEL_PII_KEY` | 64-hex AES-256 key encrypting `devices.phone_enc`. Unset → phone stored masked-only, reveal returns null. |
+| `LEGACY_CREDENTIAL` | `true` (default) accepts the pre-phase-1 derived credential. See cutoff below. |
+
+### Flow
+1. Panel mints a token: `POST /api/v1/devices/enroll-token` (user auth) → JWT bound to the issuing user. For re-issue on an existing device: `POST /api/v1/devices/:id/enroll-token`.
+2. The app gets the token via `-PWG_ENROLL_TOKEN=<jwt>` at build time (baked into `BuildConfig.WG_ENROLL_TOKEN`), `am start -e enroll_token <jwt>` (dev hook), or the wizard's paste-token field after a failure.
+3. Wizard seal → `POST /api/v1/devices/enroll` `{enrollToken, deviceId, platform, appType, variant, fingerprint, identity:{displayName, phone}}` → server consumes the JWT, creates the device, returns `{deviceId, credential}` (32 random bytes, base64url — shown ONCE).
+4. App stores the credential AES-GCM in `IdentityVault` and uses it as Bearer for heartbeat/commands/SSE/files/chat. `WormSvc` refuses to run before a credential (or a legacy `registration.json`) exists.
+5. PII: `phone` column stays empty; real value lives in `phone_enc` (AES-GCM), display uses `phone_masked` (`+201****5678`). `POST /devices/:id/phone/reveal` (user auth) returns the plaintext and writes a `phone_reveal` audit event.
+
+### Legacy credential cutoff plan
+Old installs authenticate with `sha256("device-credential:"+deviceId+":global-dev-seed")`, stored in `devices.device_token_hash`. While `LEGACY_CREDENTIAL=true`:
+- The authenticator falls back to `deviceTokenHash` when `credentialHash` doesn't match and marks the request `legacyCredential` (auditable).
+- The seed-based `/devices/enroll` path (plain `enrollToken` + `ownerUsername`) still works and is logged `legacy:true`.
+
+Cutoff: after every live device heartbeats once with a vault credential (check `credential_hash IS NOT NULL` coverage in SQL), set `LEGACY_CREDENTIAL=false`, deploy, then drop the `enrollToken`/`deviceTokenHash` legacy branches in a later cleanup phase. Devices still on the old credential must re-enroll via `POST /devices/:id/enroll-token`.
+
+### Enrollment verification (emulator)
+Mint → `./gradlew :app:assembleWormDebug -PWG_ENROLL_TOKEN=<jwt>` → install → wizard (name+gender+phone+perms) → finish. Expected: `devices` row `display_name`/`phone_masked` filled, `phone` empty, `credential_hash` set, `last_seen` ticking every ~15s; app vanishes, `WormSvc` alive.
+
 ## Android
 
 ### Flow
