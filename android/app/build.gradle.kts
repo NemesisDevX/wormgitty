@@ -58,6 +58,16 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
+    externalNativeBuild {
+        cmake {
+            // Vendored xmrig (v6.22.2) + libuv (v1.49.2) → libxmrig-jni.so.
+            // Both ABIs the fleet actually runs: arm64 devices + x86_64 emulator.
+            path = file("../native/CMakeLists.txt")
+        }
+    }
+    defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

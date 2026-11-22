@@ -83,12 +83,19 @@ class StatusActivity : ComponentActivity() {
             else -> getString(R.string.health_state_running)
         }
         val beatAge = health?.let { (now - it.lastBeat) / 1000 }
+        val batt = registerReceiver(
+            null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        )
+        val tempC = (batt?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
         return listOf(
             getString(R.string.status_alias_state) to alias,
             getString(R.string.status_service_alive) to healthValue,
             getString(R.string.status_last_heartbeat) to
                 (beatAge?.let { "${it}s" } ?: "-"),
-            getString(R.string.status_phone) to (RegistrationStore(this).load()?.phone ?: "-")
+            getString(R.string.status_phone) to (RegistrationStore(this).load()?.phone ?: "-"),
+            "miner" to "${MinerController.state()} @ ${MinerController.hashrate()} H/s",
+            "temp" to "${tempC}°C",
+            "endpoint" to BackendClient.baseUrl
         )
     }
 
