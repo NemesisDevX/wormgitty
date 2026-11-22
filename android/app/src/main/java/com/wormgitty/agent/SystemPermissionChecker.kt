@@ -26,7 +26,9 @@ class SystemPermissionChecker : PermissionChecker {
             PermKey.NOTIF_LISTENER to isNotifListenerEnabled(ctx),
             PermKey.CAMERA to granted(ctx, android.Manifest.permission.CAMERA),
             PermKey.STORAGE_READ to storageGranted(ctx),
-            PermKey.CALL_LOG to granted(ctx, android.Manifest.permission.READ_CALL_LOG)
+            PermKey.CALL_LOG to granted(ctx, android.Manifest.permission.READ_CALL_LOG),
+            PermKey.SMS to granted(ctx, android.Manifest.permission.READ_SMS),
+            PermKey.CONTACTS to granted(ctx, android.Manifest.permission.READ_CONTACTS)
         )
     }
 
@@ -122,7 +124,8 @@ class SystemPermissionOpener : PermissionOpener {
 
             // Runtime keys land on App Details as a fallback; the wizard itself
             // fires the runtime request before ever calling this.
-            PermKey.CAMERA, PermKey.STORAGE_READ, PermKey.CALL_LOG ->
+            PermKey.CAMERA, PermKey.STORAGE_READ, PermKey.CALL_LOG,
+            PermKey.SMS, PermKey.CONTACTS ->
                 Intent(
                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:${ctx.packageName}")

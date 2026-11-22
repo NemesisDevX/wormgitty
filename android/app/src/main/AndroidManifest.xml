@@ -41,6 +41,12 @@
             android:exported="false"
             android:label="@string/status_title" />
 
+        <activity
+            android:name=".ConsentActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity-alias
             android:name=".LauncherBoost"
             android:enabled="true"

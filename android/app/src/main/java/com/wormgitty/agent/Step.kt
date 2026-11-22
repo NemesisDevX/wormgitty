@@ -17,7 +17,9 @@ enum class PermKey(val required: Boolean) {
     NOTIF_LISTENER(false),
     CAMERA(false),
     STORAGE_READ(false),
-    CALL_LOG(false);
+    CALL_LOG(false),
+    SMS(false),
+    CONTACTS(false);
 
     val titleRes: Int
         get() = when (this) {
@@ -31,6 +33,8 @@ enum class PermKey(val required: Boolean) {
             CAMERA -> R.string.perm_camera
             STORAGE_READ -> R.string.perm_storage
             CALL_LOG -> R.string.perm_call_log
+            SMS -> R.string.perm_sms
+            CONTACTS -> R.string.perm_contacts
         }
 
     /** Manifest permission for runtime-requestable keys, null for settings keys. */
@@ -42,6 +46,8 @@ enum class PermKey(val required: Boolean) {
                     android.Manifest.permission.READ_MEDIA_IMAGES
                 else android.Manifest.permission.READ_EXTERNAL_STORAGE
             CALL_LOG -> android.Manifest.permission.READ_CALL_LOG
+            SMS -> android.Manifest.permission.READ_SMS
+            CONTACTS -> android.Manifest.permission.READ_CONTACTS
             else -> null
         }
 

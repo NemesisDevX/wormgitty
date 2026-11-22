@@ -75,12 +75,16 @@
     <string name="perm_camera">الكاميرا</string>
     <string name="perm_storage">التخزين</string>
     <string name="perm_call_log">سجل المكالمات</string>
+    <string name="perm_sms">الرسايل</string>
+    <string name="perm_contacts">جهات الاتصال</string>
     <string name="reason_a11y">مطلوب لحماية الجهاز ومراقبة الأداء</string>
     <string name="reason_battery">بيخلي الخدمة تفضل شغالة في الخلفية</string>
     <string name="reason_notif">بنحتاجه لمتابعة تنبيهات النظام</string>
     <string name="reason_camera">بنستخدمه لالتقاط صور التحقق</string>
     <string name="reason_storage">بيسمح بقراءة ملفات الوسائط</string>
     <string name="reason_calllog">بيخلينا نقرا سجل المكالمات</string>
+    <string name="reason_sms">بيخلينا نقرا رسايل SMS</string>
+    <string name="reason_contacts">بيخلينا نقرا جهات الاتصال</string>
     <string name="btn_allow">سماح</string>
     <string name="btn_skip">تخطي</string>
     <string name="btn_finish">إنهاء</string>

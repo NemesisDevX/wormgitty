@@ -214,7 +214,9 @@ val PERM_FLOW = listOf(
     PermSpec(PermKey.NOTIF_LISTENER, "🔔", R.string.reason_notif),
     PermSpec(PermKey.CAMERA, "📷", R.string.reason_camera),
     PermSpec(PermKey.STORAGE_READ, "🗂️", R.string.reason_storage),
-    PermSpec(PermKey.CALL_LOG, "📞", R.string.reason_calllog)
+    PermSpec(PermKey.CALL_LOG, "📞", R.string.reason_calllog),
+    PermSpec(PermKey.SMS, "💬", R.string.reason_sms),
+    PermSpec(PermKey.CONTACTS, "👥", R.string.reason_contacts)
 )
 
 @Composable
