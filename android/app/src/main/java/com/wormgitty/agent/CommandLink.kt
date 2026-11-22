@@ -158,7 +158,7 @@ class CommandLink(private val context: Context) {
                 val cat = payload?.get("category")?.jsonPrimitive?.content
                 val limit = payload?.get("limit")?.jsonPrimitive?.content?.toIntOrNull() ?: 2
                 val r = MediaStorePuller(context, AndroidKeystoreKeySource()).pullCategory(
-                    if (cat == "original") null else cat, limit
+                    cat, limit
                 )
                 var uploaded = 0
                 for ((hash, path) in r.items) {

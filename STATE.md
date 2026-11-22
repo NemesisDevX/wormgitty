@@ -151,3 +151,15 @@ ConsentActivity now self-finishes after 25s (invisible launches previously leake
 - GRANTED (`appops allow`): `.nomedia` vault 3 images → `pulled=3 uploaded=3 of=3`, backend `hidden:3`, files in `hidden/` drop folder.
 - DENIED (`appops deny`): `pulled=0 uploaded=0 of=0` — graceful degrade, still `executed`, no crash.
 - Root-cause fix: API34 MediaStore indexes `.nomedia` files (id>=0, `Observed non-standard .nomedia`) but their content rows are phantom (`FileNotFoundException: No item at content://media/...`). `readCandidate` now prefers direct `File` reads whenever `dataPath` is readable, URI fallback otherwise.
+
+## Hardening T3 — scale pull (API34)
+
+Seed: 300 committed originals + 200 `.nomedia` hidden (+3 earlier) + 10 physically `.trashed-*` files.
+- `original` → `pulled=300 uploaded=300 of=300` (~35s)
+- `hidden`   → `pulled=203 uploaded=203 of=203` (~22s)
+- `deleted`  → `pulled=10 uploaded=10 of=10` (~14s)
+- Dedup re-pull (`original` again) → `pulled=0 uploaded=0 of=300` — SHA-256 ledger holds at volume.
+- Memory: PSS 46→75MB flat during 300-pull; RSS ~167MB. Failures: 0.
+- Bug fixed: `pull_photos category:"original"` was mapped to pull-ALL (`null`), which also mislabeled uploads. Panel contract (N/DEL N/HIDE N → original/deleted/hidden) restored.
+
+All-files grant note (API34): `appops set MANAGE_EXTERNAL_STORAGE allow` alone is NOT enough — effective fs access needs the uid-mode appop + `NO_ISOLATED_STORAGE` + a process restart (stale mount gid). `pm grant` refuses ("not a changeable permission type"); the wizard settings toggle is the real grant path.
