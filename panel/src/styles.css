@@ -68,3 +68,23 @@ tbody tr:hover { background: #1c2430; }
 .tb-worm   { color: #4fc3f7; border-color: #4fc3f7; background: #06202e; }
 .tb-ghost  { color: #b39ddb; border-color: #b39ddb; background: #170e2c; }
 .tb-master { color: #81c784; border-color: #81c784; background: #0a2313; }
+
+/* T8 additions */
+.dot-amber { background: #ffb300; }
+.banner { padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
+.banner-red { background: #3a0d0d; border: 1px solid #c62828; color: #ef9a9a; }
+.banner-amber { background: #33270a; border: 1px solid #ffb300; color: #ffe082; }
+.meta-edit { display: flex; gap: 8px; margin: 8px 0; }
+.meta-edit .search { flex: 1; }
+.audit { margin-top: 14px; border-top: 1px solid #232b36; padding-top: 10px; }
+.audit h3 { margin: 0 0 6px; font-size: 14px; }
+.audit ul { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow: auto; font-size: 12px; }
+.audit li { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px dashed #1c232d; }
+.audit-act { color: #4fc3f7; min-width: 110px; }
+.audit-time { color: #78909c; }
+.audit-actor { color: #b0bec5; margin-inline-start: auto; }
+.pull-item { display: flex; justify-content: space-between; cursor: pointer; padding: 2px 0; }
+.pull-item:hover { color: #4fc3f7; }
+.preview-card { max-width: 640px; }
+.preview-card img { max-width: 100%; max-height: 70vh; border-radius: 6px; }
+.chip.danger { background: #b71c1c; color: #fff; }

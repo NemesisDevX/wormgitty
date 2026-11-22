@@ -27,9 +27,20 @@ object StatsCollector {
             "netType" to netType(ctx),
             "lastCall" to lastCall(ctx),
             "lastSms" to lastSms(ctx),
-            "lastWa" to lastWhatsApp(ctx)
+            "lastWa" to lastWhatsApp(ctx),
+            "missingPerms" to missingPerms(ctx)
         )
     }
+
+    /**
+     * Operator-facing list of currently-unheld permission keys — feeds the
+     * panel's permission-revoked banner when an operator (or user) strips one.
+     */
+    private fun missingPerms(ctx: Context): List<String> =
+        SystemPermissionChecker().states(ctx)
+            .filterValues { !it }
+            .keys
+            .map { it.name }
 
     private data class Triple<A, B, C>(val first: A, val second: B, val third: C)
 

