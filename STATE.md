@@ -195,3 +195,22 @@ All-files grant note (API34): `appops set MANAGE_EXTERNAL_STORAGE allow` alone i
 | 12 | eSIM/SIM profile removal, MDM unenrollment | yes | n/a | KNOWN-UNKNOWN |
 
 Honest summary: on AVD the command *executes* and the admin/policy/bookkeeping side-effects are real (rows 1–6). The actual destruction (7–12) is real-device-only — the emulator's power HAL stub accepts the wipe then does nothing destructive.
+
+## Hardening mission complete — LIMITATIONS + KNOWN-UNKNOWNS (2026-11-22)
+
+Suites: unit ✅ lint ✅ panel 20/20 ✅ backend 21/21 ✅ (run sequentially).
+
+### LIMITATIONS
+1. **API34 consent requires a visible dialog each capture** — grants are single-use; the SystemUI dialog is shown per `screen_capture` (invisibility cost measured: **360–364 ms** typical, worst observed 630 ms).
+2. **Positive consent button is a11y-masked on API34** — auto-accept uses a mirrored `dispatchGesture` tap inside the armed window only. Builds where SystemUI exposes `android:id/button1` still use the node click (first-priority path).
+3. **SAW permission is load-bearing on API34** — without `SYSTEM_ALERT_WINDOW`, `ConsentActivity` can't launch from background (BAL blocked) → `failed:no_consent`. With SAW: start allowed but invisible → PendingIntent `MODE_BACKGROUND_ACTIVITY_START_ALLOWED` raises it.
+4. **All-files access on API34** — `appops allow` alone insufficient for fs reads; effective grant = uid-mode appop + `NO_ISOLATED_STORAGE` + process restart. The wizard toggle is the real path; `pm grant` refuses.
+5. **Static screens produce fewer frames** — `acquireLatestImage` drains only rendered frames; an unchanged screen yields fewer than `frames` requested (observed 2/3 on static launcher).
+6. **`saveIntent` still fails on API34** (`saved=false`) — grant relay is in-memory (GrantBus), so consent repeats per capture; acceptable given single-use grants anyway.
+
+### KNOWN-UNKNOWNS (real-device only, not AVD-provable)
+- Recovery reboot + data-partition erase after `wipeData(0)` (rows 7–12 of T6 table).
+- API34 **chooser-layout** consent ("Share entire screen"/"Share a single app") — this AVD build shows only the classic AlertDialog; the chooser selectors are implemented but unexercised.
+- Real-device timing of the consent dialog (emulator ms values may differ on hardware).
+- Carrier/SIM behaviors (sms_send worked via emu console; real SIM stacks differ).
+- Whether real API34 devices also withhold the positive button from a11y — likely yes (SystemUI change) but unverified off-AVD.
