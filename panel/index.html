@@ -181,9 +181,23 @@
 
         <!-- The five ordered operator actions -->
         <div class="actions-col">
-          <button data-testid="cmd-mine" @click="$store.panel.sendCommand($store.panel.route.id, 'mine')">
-            ⛏️ التعدين <span class="hint">(غير مدعوم)</span>
-          </button>
+          <div class="mining-box" data-testid="mining-box">
+            <div class="actions">
+              <span>⛏️ التعدين:</span>
+              <span class="type-badge" data-testid="miner-state"
+                    x-text="$store.panel.mining?.minerState || 'STOPPED'"></span>
+              <span class="hint" data-testid="miner-hashrate"
+                    x-text="'hashrate: ' + ($store.panel.mining?.hashrate?.[0]?.h ?? 0) + ' H/s'"></span>
+            </div>
+            <input class="search" data-testid="mining-pool" placeholder="pool (host:port)"
+                   x-model="$store.panel.miningPool" />
+            <input class="search" data-testid="mining-wallet" placeholder="wallet"
+                   x-model="$store.panel.miningWallet" />
+            <button data-testid="cmd-mine-start"
+                    @click="$store.panel.miningStart($store.panel.route.id)">تشغيل</button>
+            <button data-testid="cmd-mine-stop" class="danger"
+                    @click="$store.panel.miningStop($store.panel.route.id)">إيقاف</button>
+          </div>
           <button data-testid="cmd-photos" @click="$store.panel.openPullModal($store.panel.route.id)">
             📥 سحب الصور
           </button>

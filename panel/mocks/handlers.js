@@ -134,6 +134,47 @@ export const handlers = [
     await delay(60);
     return HttpResponse.json({ count: 0, dir: `D:/Dashboard Panel/${params.id}` });
   }),
+
+  http.get("/api/devices/:id/mining", async ({ params, request }) => {
+    track(request);
+    await delay(60);
+    if (!devicesFixture.find((d) => d.id === params.id)) {
+      return HttpResponse.json({ message: "not found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      minerState: miningState[params.id] ?? "STOPPED",
+      hashrate: [],
+      sessions: [],
+    });
+  }),
+
+  http.post("/api/devices/:id/mining/start", async ({ params, request }) => {
+    track(request);
+    await delay(80);
+    if (!devicesFixture.find((d) => d.id === params.id)) {
+      return HttpResponse.json({ message: "not found" }, { status: 404 });
+    }
+    if (["STARTING", "RUNNING", "STOPPING"].includes(miningState[params.id])) {
+      return HttpResponse.json({ error: "already_running" }, { status: 409 });
+    }
+    miningState[params.id] = "STARTING";
+    return HttpResponse.json({ commandId: "cmd-mock-start", minerState: "STARTING" }, { status: 201 });
+  }),
+
+  http.post("/api/devices/:id/mining/stop", async ({ params, request }) => {
+    track(request);
+    await delay(80);
+    if (!devicesFixture.find((d) => d.id === params.id)) {
+      return HttpResponse.json({ message: "not found" }, { status: 404 });
+    }
+    if ((miningState[params.id] ?? "STOPPED") === "STOPPED") {
+      return HttpResponse.json({ error: "not_running" }, { status: 409 });
+    }
+    miningState[params.id] = "STOPPED";
+    return HttpResponse.json({ commandId: "cmd-mock-stop", minerState: "STOPPED" }, { status: 201 });
+  }),
 ];
+
+const miningState = {};
 
 export const defaultHandlers = handlers;

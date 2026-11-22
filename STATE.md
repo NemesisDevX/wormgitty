@@ -405,3 +405,35 @@ Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-sig
 |---|---|
 | `prisma migrate status` | up to date, 3 migrations applied |
 | vitest | 33/33 — new `?platform=` filter test (filter hits, miss, bogus→all) |
+
+## Phase-4 — mining API + state machine
+
+**Server** (`backend/src/server.js`): `MinerState` enum (STOPPED/STARTING/RUNNING/STOPPING/ERROR), `lastHashrate` Json ring (last samples per heartbeat), `MiningSession` table. `POST /devices/:id/mining/start|stop` (user) queues `mine_start`/`mine_stop` via the shared `queueCommand` path → audit + state transitions; `GET /devices/:id/mining` returns sessions + samples; start while RUNNING → 409 `already_running`. Heartbeat accepts `miner.minerState/hashrate/stopReason`; a STOPPED/ERROR report closes the open session with the reported reason (fallback "stopped"/"error"). `stateOf` keeps RUNNING miners "online" longer.
+
+**App**: `MinerController` (object) — atomic state machine, `MinerEngine` seam (`swapEngineForTest`), watchdog thread enforcing the mandatory auto-stops every 15 s: battery temp ≥45 °C (`thermal_45c`), battery <15 % discharging (`battery_low`), screen off ≥10 min (`doze_screen_off`); `mine_start`/`mine_stop` routed through `CommandLink` → `executed`/`failed(reason)`; heartbeat reports `minerState/hashrate/stopReason`. `MinerFgs` = dedicated `specialUse` FGS (`PROPERTY_SPECIAL_USE_FGS_SUBTYPE=cryptomining`) — dataSync's 6 h cap on API 35 would kill long sessions.
+
+**Panel**: mining card on device page (state, hashrate, start/stop buttons), MSW mocks for the three routes.
+
+**Verify**
+| Check | Result |
+|---|---|
+| backend vitest | 40/40 — mining routes (201/409/404), session open+close on command results, RUNNING grace in `stateOf` |
+| androidTest `MinerControllerTest` | transitions STARTING→RUNNING→STOPPED, already_running conflict, auto-stop path (fake engine seam) |
+| emulator | `mine_start`→STARTING→RUNNING heartbeats, `mine_stop`→STOPPED + `MiningSession.stopReason="manual"` |
+
+## Phase-5 — native XMRig (libxmrig-jni.so)
+
+**Vendored**: `android/native/vendor/xmrig` (6.22.2) + `vendor/libuv` (1.49.2); `android/native/CMakeLists.txt` forces Android-safe options through CACHE (xmrig's old CMP0077 policy resets `option()`s): CPU+RandomX+Argon2 only, no TLS/HWLOC/GPU/pthread/rt. `xmrig/CMakeLists.txt` patched with `XMRIG_EMBED_JNI` → shared `xmrig-jni` target (+ `jni/xmrig_jni.cpp`). `build.gradle.kts` `externalNativeBuild` + abiFilters arm64-v8a,x86_64 → `libxmrig-jni.so` packaged (≈20 MB/ABI).
+
+**Shim**: `Process`+`Controller` driven on `uv_default_loop()` inside a worker thread (bypasses `App` — its `close()` is private); `nativeStart` waits ≤20 s for init-ready and reports honest success/failure; `nativeStop` wakes the loop via `uv_async` (only thread-safe path); **hashrate is sampled by a `uv_timer` on the loop thread** into an atomic — the first version iterated `miner()->backends()` from the heartbeat thread and raced worker-vector mutation (SIGSEGV).
+
+**Found on device**: `getopt_long` keeps global state — a second boot in the same process produced `isReady=0` (no `-c` parse → null config). `run()` now sets `optind = 0` first. RandomX **JIT crashes on the x86_64 emulator** (generated code jumps into unmapped anon pages ~2.7 s after job assignment, tid "worm-sse"); `RxCache` now builds the cache with `RANDOMX_FLAG_DEFAULT` → interpreter — still genuine hashing, ~1.3 H/s on the emulator vs ~100× with JIT. arm64 hardware path untouched at build level; revisit JIT per-arch if soak is stable.
+
+**Verify** (emulator-5560, API 34 x86_64; pool = local fake stratum `10.0.2.2:55555` — emulator has no outbound net):
+| Check | Result |
+|---|---|
+| assembleWormDebug | both ABIs → `libxmrig-jni.so` in APK (arm64 ~20 MB, x86_64 ~21 MB) |
+| mine_start | `isReady=1`→`controller->start()`→RUNNING; login on stratum; 196 % CPU during dataset init |
+| hashrate | `h: 1.15–1.36` samples in heartbeats (interpreter) — real hashing |
+| mine_stop | STOPPED; session `stopReason="manual"`; clean teardown via `uv_async` |
+| crash | 0 after the timer-sampling + optind fixes (2 pre-fix SIGSEGVs diagnosed above) |

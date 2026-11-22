@@ -120,6 +120,17 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
+        <!-- Mining runs here, not in WormSvc: dataSync FGS is capped at 6h on
+             Android 15 and would kill long sessions. -->
+        <service
+            android:name=".MinerFgs"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="cryptomining" />
+        </service>
+
         <receiver
             android:name=".BootRcv"
             android:directBootAware="true"

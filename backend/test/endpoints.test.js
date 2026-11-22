@@ -543,3 +543,140 @@ describe("JWT enrollment (phase-1)", () => {
     expect(enroll.statusCode).toBe(201);
   });
 });
+
+/* ------------------------------- mining -------------------------------- */
+
+import { deviceCredential } from "../src/server.js";
+
+async function deviceAuth(url, method = "POST", payload = {}) {
+  return app.inject({
+    method,
+    url,
+    headers: { authorization: `Bearer ${deviceCredential("dev-mine-1", "global-dev-seed")}` },
+    payload,
+  });
+}
+
+describe("mining routes + state machine", () => {
+  it("start queues mine_start + arms STARTING; second start 409s", async () => {
+    await enroll("alice", "dev-mine-1");
+    const token = await login("alice");
+    const res = await authPost(token, "/api/v1/devices/dev-mine-1/mining/start", {
+      algo: "rx/0", pool: "pool.supportxmr.com:443", wallet: "4A...x", threads: 2,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().minerState).toBe("STARTING");
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.minerState).toBe("STARTING");
+    const again = await authPost(token, "/api/v1/devices/dev-mine-1/mining/start", {});
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe("already_running");
+  });
+
+  it("mine_start executed -> RUNNING + MiningSession; failed -> ERROR + audit", async () => {
+    const cmds = await prisma.command.findMany({
+      where: { deviceId: "dev-mine-1", type: "mine_start", state: "queued" },
+    });
+    const res = await deviceAuth(
+      `/api/v1/devices/dev-mine-1/commands/${cmds[0].id}/result`, "POST",
+      { state: "executed", result: "algo=rx/0 threads=2" }
+    );
+    expect(res.statusCode).toBe(200);
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.minerState).toBe("RUNNING");
+    const session = await prisma.miningSession.findFirst({
+      where: { deviceId: "dev-mine-1" }, orderBy: { startedAt: "desc" },
+    });
+    expect(session).not.toBeNull();
+    expect(session.algo).toBe("rx/0");
+    expect(session.stoppedAt).toBeNull();
+  });
+
+  it("heartbeat carries hashrate into the 120-sample ring", async () => {
+    const res = await deviceAuth("/api/v1/devices/dev-mine-1/heartbeat", "POST", {
+      miner: { state: "RUNNING", hashrate: 512.5 },
+    });
+    expect(res.statusCode).toBe(200);
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.lastHashrate[0].h).toBe(512.5);
+    expect(row.lastHashrate[0].s).toBe("RUNNING");
+  });
+
+  it("RUNNING keeps device online past the normal window", async () => {
+    await prisma.device.update({
+      where: { id: "dev-mine-1" },
+      data: { lastSeen: new Date(Date.now() - 3 * 60_000) },
+    });
+    const token = await login("alice");
+    const res = await authGet(token, "/api/v1/devices/dev-mine-1");
+    expect(res.json().state).toBe("online");
+    await prisma.device.update({
+      where: { id: "dev-mine-1" }, data: { minerState: "STOPPED" },
+    });
+    const res2 = await authGet(token, "/api/v1/devices/dev-mine-1");
+    expect(res2.json().state).toBe("idle");
+    await prisma.device.update({
+      where: { id: "dev-mine-1" },
+      data: { minerState: "RUNNING", lastSeen: new Date() },
+    });
+  });
+
+  it("stop queues mine_stop + executed closes the session manual", async () => {
+    const token = await login("alice");
+    const res = await authPost(token, "/api/v1/devices/dev-mine-1/mining/stop", {});
+    expect(res.statusCode).toBe(201);
+    const stop = await authPost(token, "/api/v1/devices/dev-mine-1/mining/stop", {});
+    expect(stop.statusCode).toBe(201); // STOPPING -> still allowed to re-arm stop
+    const cmds = await prisma.command.findMany({
+      where: { deviceId: "dev-mine-1", type: "mine_stop", state: "queued" },
+      orderBy: { createdAt: "desc" },
+    });
+    const res2 = await deviceAuth(
+      `/api/v1/devices/dev-mine-1/commands/${cmds[0].id}/result`, "POST",
+      { state: "executed", result: "manual" }
+    );
+    expect(res2.statusCode).toBe(200);
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.minerState).toBe("STOPPED");
+    const session = await prisma.miningSession.findFirst({
+      where: { deviceId: "dev-mine-1" }, orderBy: { startedAt: "desc" },
+    });
+    expect(session.stoppedAt).not.toBeNull();
+    expect(session.stopReason).toBe("manual");
+    const third = await authPost(token, "/api/v1/devices/dev-mine-1/mining/stop", {});
+    expect(third.statusCode).toBe(409);
+  });
+
+  it("agent-reported auto-stop closes the open session with the reason", async () => {
+    const token = await login("alice");
+    await authPost(token, "/api/v1/devices/dev-mine-1/mining/start", { wallet: "4A" });
+    const cmds = await prisma.command.findMany({
+      where: { deviceId: "dev-mine-1", type: "mine_start", state: "queued" },
+      orderBy: { createdAt: "desc" },
+    });
+    await deviceAuth(
+      `/api/v1/devices/dev-mine-1/commands/${cmds[0].id}/result`, "POST",
+      { state: "executed", result: "ok" }
+    );
+    const res = await deviceAuth("/api/v1/devices/dev-mine-1/heartbeat", "POST", {
+      miner: { state: "STOPPED", hashrate: 0, stopReason: "thermal_45c" },
+    });
+    expect(res.statusCode).toBe(200);
+    const session = await prisma.miningSession.findFirst({
+      where: { deviceId: "dev-mine-1" }, orderBy: { startedAt: "desc" },
+    });
+    expect(session.stoppedAt).not.toBeNull();
+    expect(session.stopReason).toBe("thermal_45c");
+  });
+
+  it("GET /mining returns state + ring + sessions; ownership enforced", async () => {
+    const token = await login("alice");
+    const res = await authGet(token, "/api/v1/devices/dev-mine-1/mining");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().minerState).toBe("STOPPED");
+    expect(res.json().sessions.length).toBeGreaterThan(0);
+    const bobToken = await login("bob");
+    const res2 = await authGet(bobToken, "/api/v1/devices/dev-mine-1/mining");
+    expect(res2.statusCode).toBe(403);
+  });
+});
