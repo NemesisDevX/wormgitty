@@ -106,3 +106,8 @@ P0 safety ✅ · P1 app redesign ✅ · P2 dashboard ✅ · P3 realtime+Room ✅
 - Method: inserted phantom Device `Ghost 7d` (formattedAt=null, lastSeen=now-8d) — backdating a live device fails because the app heartbeat rewrites lastSeen within ~15s.
 - Deleted filter showed BOTH Ghost 7d (7-day rule) AND Sara A33 (formattedAt rule) with red dots — screenshot `.shots/t6b_deleted_filter.png`. Ghost row deleted after test.
 - NOTE: `am force-stop` does NOT hold for WormSvc (sticky FGS + registered services restart it) — lastSeen self-heals in seconds, which is itself the desired liveness behavior.
+
+## T7 — Wipe post-state (API 33, executed in P6) — VERIFIED
+- `dpm list-owners` → "no owners"; `AdminRcv` entry `isEnabled=false`; `mPasswordOwner=-1` — device-admin ownership cleared by `wipeData(0)`.
+- Backend: `formattedAt=2026-11-21T21:40:01.410Z`, device flips to deleted in panel (T6 screenshot row Sara A33).
+- LIMITATION (ranchu AVD): `wipeData` cleared admin rights but did NOT reboot/factory-reset the emulator — app package, /data/data files (registration.json, operator/) all persist. The recovery-reboot path is real-device-only behavior; on AVD the wipe is admin-rights revocation + backend flag, not disk erasure.
