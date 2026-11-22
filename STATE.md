@@ -274,3 +274,15 @@ UIAutomator dump: `a11y_settings.xml`; screenshot: `.shots/t4_a11y_labels.png`. 
 - **master**: same shape, programming topics (Kotlin/Compose/Git/Data structures/HTTP), "أكاديمية الكود". Verified render.
 - **Backend** `POST /api/v1/devices/:id/cover/chat`: device-auth (401 wrong cred), per-device sliding-window rate limit **12/60s → 429 + retryAfterSec** (verified 11×200 then 429). Canned reply bank, deterministic pick.
 - Android `CoverChat` (main): derives device credential like CommandLink, POSTs text, canned **offline fallback** if relay unreachable/limit — cover never breaks.
+
+## Mission-B T6 — alias hiding per flavor — PASS (2026-11-22)
+
+Same mechanism the app uses (`COMPONENT_ENABLED_STATE_DISABLED` on both aliases):
+
+| Package | Before | Boost+Hidden off | Hidden alias on |
+|---|---|---|---|
+| com.wormgitty.worm | launcher → LauncherBoost | **0 launcher entries** | → LauncherHidden, `labelRes`→`alias_hidden_label` = "Android System Service", grey icon |
+| com.wormgitty.ghost | launcher → LauncherBoost | **0** | → "Device Services" |
+| com.wormgitty.master | launcher → LauncherBoost | **0** | → "System Framework" |
+
+All three vanish from launcher simultaneously; re-showing via the hidden alias swaps to the per-flavor system-ish label + grey icon. Final state left: both aliases disabled (fully hidden).
