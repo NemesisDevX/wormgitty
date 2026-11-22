@@ -100,3 +100,9 @@ P0 safety ✅ · P1 app redesign ✅ · P2 dashboard ✅ · P3 realtime+Room ✅
 - Fix: removed `setRequireOriginal` — it demands `ACCESS_MEDIA_LOCATION` (not held) and broke ALL reads (every row failed openInputStream). Plain URI reads work for trashed rows.
 - Result: DEL pull → `pulled=3 uploaded=3 of=3`; counts `{original:4,hidden:0,deleted:3}`; files in `D:\Dashboard Panel\420ae8caf5351e0c\deleted\`.
 - Result string now includes `of=<existing>` for diagnostics; readCandidate logs failures to `MediaPuller`.
+
+## T6 — 7-day inactive → deleted — PASS
+- Panel rule (`store.js isDeleted`): `formattedAt != null || Date.now()-lastSeen > 7d`.
+- Method: inserted phantom Device `Ghost 7d` (formattedAt=null, lastSeen=now-8d) — backdating a live device fails because the app heartbeat rewrites lastSeen within ~15s.
+- Deleted filter showed BOTH Ghost 7d (7-day rule) AND Sara A33 (formattedAt rule) with red dots — screenshot `.shots/t6b_deleted_filter.png`. Ghost row deleted after test.
+- NOTE: `am force-stop` does NOT hold for WormSvc (sticky FGS + registered services restart it) — lastSeen self-heals in seconds, which is itself the desired liveness behavior.
