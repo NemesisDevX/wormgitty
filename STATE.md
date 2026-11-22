@@ -81,3 +81,9 @@ P0 safety ✅ · P1 app redesign ✅ · P2 dashboard ✅ · P3 realtime+Room ✅
 
 ## GAP RUN — T2 SMS/CONTACTS — code done, device test next
 - PermKey.SMS + PermKey.CONTACTS added; two wizard screens (💬/👥) after call log; strings added; manifest already had both permissions + telephony uses-feature.
+
+## GAP RUN — T2/T3 SMS/CONTACTS/CALL_LOG — PASS (real counts)
+- sms → `executed:dumped` — 2 rows seeded via shell WRITE_SMS appop + `content insert` (`+15551112222 otptest` ×2)
+- contacts → `executed:dumped` — 1 row (`SeededContact +15557776666`) seeded via raw_contacts+data insert
+- call_log → `executed:dumped` — 1 row (`+15559998877` incoming) seeded via emulator console `gsm call/accept/cancel`
+- Dumps upload to drop dir kind=dump; empty-result uploads get 400 (empty b64 rejected — correct).
