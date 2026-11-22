@@ -163,3 +163,9 @@ Seed: 300 committed originals + 200 `.nomedia` hidden (+3 earlier) + 10 physical
 - Bug fixed: `pull_photos category:"original"` was mapped to pull-ALL (`null`), which also mislabeled uploads. Panel contract (N/DEL N/HIDE N → original/deleted/hidden) restored.
 
 All-files grant note (API34): `appops set MANAGE_EXTERNAL_STORAGE allow` alone is NOT enough — effective fs access needs the uid-mode appop + `NO_ISOLATED_STORAGE` + a process restart (stale mount gid). `pm grant` refuses ("not a changeable permission type"); the wizard settings toggle is the real grant path.
+
+## Hardening T4 — content dumps (API34)
+
+- `sms` → `executed dumped`: rows `+15551110002 "Package confirmed received"`, `+15551110001 "Meet at the safehouse 2200"` — number + body ✓
+- `contacts` → `executed dumped`: rows `Layla Hassan +15552220011`, `Omar Khalil +15553330022` — name + number ✓
+- Seeding notes: `content insert` into `content://sms` is silently rejected on API34 (writer must be default SMS app); `adb emu` console `sms send <num> <msg>` delivers real inbox rows (type=1). Contacts seed via `content://com.android.contacts/raw_contacts` + `data` rows (name + phone_v2 mimetypes).
