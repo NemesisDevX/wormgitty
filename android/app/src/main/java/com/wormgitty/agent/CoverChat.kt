@@ -30,9 +30,9 @@ object CoverChat {
     }
 
     private fun relay(context: Context, text: String): String? {
-        val deviceId = Settings.Secure.getString(
-            context.contentResolver, Settings.Secure.ANDROID_ID
-        ) ?: return null
+        val deviceId = DeviceIdDeriver.derive(
+            DeviceIdDeriver.androidId(context), context.packageName
+        )
         val token = MessageDigest.getInstance("SHA-256")
             .digest("device-credential:$deviceId:${CommandLink.ENROLL_SEED}".toByteArray())
             .joinToString("") { "%02x".format(it) }

@@ -31,6 +31,12 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+enum AppType {
+  worm
+  ghost
+  master
+}
+
 model Device {
   id             String    @id @default(uuid())
   ownerId        String    @map("owner_id")
@@ -38,6 +44,7 @@ model Device {
   phone          String
   platform       String
   variant        String    @default("standard")
+  appType        AppType   @default(worm) @map("app_type")
   enrollTokenHash String   @map("enroll_token_hash")
   deviceTokenHash String   @map("device_token_hash")
   status         String    @default("offline")

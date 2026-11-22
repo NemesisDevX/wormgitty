@@ -286,3 +286,11 @@ Same mechanism the app uses (`COMPONENT_ENABLED_STATE_DISABLED` on both aliases)
 | com.wormgitty.master | launcher → LauncherBoost | **0** | → "System Framework" |
 
 All three vanish from launcher simultaneously; re-showing via the hidden alias swaps to the per-flavor system-ish label + grey icon. Final state left: both aliases disabled (fully hidden).
+
+## Mission-C T7 — Device.appType end-to-end — PASS (2026-11-22)
+
+- **Schema**: `enum AppType { worm ghost master }`; `Device.appType AppType @default(worm)` replaces `variant` as the flavor signal (`variant` column kept for legacy strings). `prisma db push` + regen done.
+- **Enroll**: `POST /devices/enroll` accepts `appType ∈ {worm,ghost,master}`, 400 `bad_app_type` otherwise; heartbeat accepts `appType` and updates the row.
+- **Android**: `deviceId()` now `DeviceIdDeriver.derive(ANDROID_ID, packageName)` — per-package derived id so **co-installed flavors register as distinct devices**. Heartbeat payload includes `BuildConfig.FLAVOR` as `appType`. `CoverChat` uses the same derivation.
+- **Panel**: `appTypeFilter` chip-select (Worm/Ghost/Master), `appTypeBadge` pill column on the devices table (blue/purple/green), badge on device detail header, `GET /api/v1/devices.csv` export with `appType` column + toolbar CSV button.
+- **Verified**: all 3 flavors enrolled as separate rows (ids `9f56ba44…`,`c82af117…`,`5bae9d86…`), heartbeats set `appType=worm/ghost/master` online; CSV shows the column; panel screenshots `.shots/t7_apptype_badges.png` (all types) + `t7_worm_filter.png` (worm-only rows).

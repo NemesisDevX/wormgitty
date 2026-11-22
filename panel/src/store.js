@@ -1,5 +1,5 @@
 ﻿import Alpine from "alpinejs";
-import { apiFetch, ApiError, setAccessToken } from "./lib/api.js";
+import { apiFetch, ApiError, setAccessToken, getAccessToken, refreshTokens } from "./lib/api.js";
 import { formatE164 } from "./lib/e164.js";
 import { stateBadge } from "./lib/badge.js";
 
@@ -36,6 +36,7 @@ export function makePanelStore() {
     pendingTicket: "",
     statusFilter: "",
     genderFilter: "",
+    appTypeFilter: "",
     search: "",
     wipeArmed: false,
     pullModal: { open: false, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null },
@@ -259,6 +260,7 @@ export function makePanelStore() {
           if (this.statusFilter === "online" && (this.isDeleted(d) || d.state !== "online")) return false;
           if (this.statusFilter === "offline" && (this.isDeleted(d) || d.state === "online")) return false;
           if (this.genderFilter && (d.gender || "") !== this.genderFilter) return false;
+          if (this.appTypeFilter && (d.appType || "worm") !== this.appTypeFilter) return false;
           if (q && !(d.name || "").toLowerCase().includes(q) && !(d.phone || "").includes(q)) return false;
           return true;
         });
@@ -276,6 +278,30 @@ export function makePanelStore() {
 
     genderIcon(d) {
       return d.gender === "female" ? "♀ أنثى" : d.gender === "male" ? "♂ ذكر" : "—";
+    },
+
+    appTypeBadge(d) {
+      const t = d.appType || "worm";
+      return { worm: { label: "Worm", cls: "tb-worm" }, ghost: { label: "Ghost", cls: "tb-ghost" },
+               master: { label: "Master", cls: "tb-master" } }[t] || { label: t, cls: "tb-worm" };
+    },
+
+    async exportCsv() {
+      let res = await fetch("/api/v1/devices.csv", {
+        headers: { Authorization: `Bearer ${getAccessToken()}` },
+      });
+      if (res.status === 401 && (await refreshTokens())) {
+        res = await fetch("/api/v1/devices.csv", {
+          headers: { Authorization: `Bearer ${getAccessToken()}` },
+        });
+      }
+      if (!res.ok) { this.flash = "CSV فشل"; return; }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "devices.csv";
+      a.click();
+      URL.revokeObjectURL(a.href);
     },
 
     daysWithUs(d) {

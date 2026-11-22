@@ -85,13 +85,20 @@
           <option value="male">ذكر</option>
           <option value="female">أنثى</option>
         </select>
+        <select data-testid="apptype-filter" x-model="$store.panel.appTypeFilter" class="chip-select">
+          <option value="">التطبيق: الكل</option>
+          <option value="worm">Worm</option>
+          <option value="ghost">Ghost</option>
+          <option value="master">Master</option>
+        </select>
         <input data-testid="device-search" class="search" type="search" placeholder="بحث بالاسم أو الرقم"
                @input.debounce.300ms="$store.panel.search = $event.target.value" />
+        <button data-testid="csv-export" class="chip" @click="$store.panel.exportCsv()">⬇ CSV</button>
       </div>
 
       <table data-testid="devices-table" class="card">
         <thead>
-          <tr><th></th><th>الاسم</th><th>الموبايل</th><th>النوع</th><th>الحالة</th><th>معانا منذ</th></tr>
+          <tr><th></th><th>الاسم</th><th>الموبايل</th><th>النوع</th><th>التطبيق</th><th>الحالة</th><th>معانا منذ</th></tr>
         </thead>
         <tbody>
           <template x-for="d in $store.panel.filteredDevices()" :key="d.id">
@@ -100,6 +107,9 @@
               <td x-text="d.name"></td>
               <td x-text="$store.panel.formatE164(d.phone)"></td>
               <td x-text="$store.panel.genderIcon(d)"></td>
+              <td><span class="type-badge" :class="$store.panel.appTypeBadge(d).cls"
+                        :data-testid="'apptype-' + d.id"
+                        x-text="$store.panel.appTypeBadge(d).label"></span></td>
               <td x-text="$store.panel.stateLabel(d)"></td>
               <td x-text="$store.panel.daysWithUs(d) + ' يوم'"></td>
             </tr>
@@ -124,6 +134,9 @@
       <article class="card" data-testid="device-card">
         <h2 data-testid="detail-name" x-text="$store.panel.detail?.name"></h2>
         <p>
+          <span class="type-badge" :class="$store.panel.appTypeBadge($store.panel.detail || {}).cls"
+                :data-testid="'detail-apptype'"
+                x-text="$store.panel.appTypeBadge($store.panel.detail || {}).label"></span>
           <span data-testid="detail-phone" x-text="$store.panel.formatE164($store.panel.detail?.phone)"></span>
           — <span data-testid="detail-model" x-text="$store.panel.detail?.model"></span>
           — <span data-testid="detail-state" :class="$store.panel.badgeOf($store.panel.detail?.state).className"

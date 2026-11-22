@@ -43,7 +43,7 @@ class CommandLink(private val context: Context) {
     }
 
     private fun deviceId(): String =
-        Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
+        DeviceIdDeriver.derive(DeviceIdDeriver.androidId(context), context.packageName)
 
     private fun deviceCredential(deviceId: String): String =
         MessageDigest.getInstance("SHA-256")
@@ -72,7 +72,7 @@ class CommandLink(private val context: Context) {
         val statsJson = StatsCollector.collect(context).entries.joinToString(",") { (k, v) ->
             "\"$k\":" + jsonVal(v)
         }
-        return """{"gender":"$gender","stats":{$statsJson}}"""
+        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","stats":{$statsJson}}"""
     }
 
     private fun jsonVal(v: Any?): String = when (v) {

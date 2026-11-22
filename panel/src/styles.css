@@ -62,3 +62,9 @@ tbody tr:hover { background: #1c2430; }
 .progress { height: 8px; background: #10151c; border-radius: 999px; overflow: hidden; }
 .progress .bar { height: 100%; background: #66bb6a; transition: width .4s; }
 [x-cloak] { display: none !important; }
+
+/* app-type badges (worm/ghost/master) */
+.type-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #2e3947; margin-inline-end: 6px; }
+.tb-worm   { color: #4fc3f7; border-color: #4fc3f7; background: #06202e; }
+.tb-ghost  { color: #b39ddb; border-color: #b39ddb; background: #170e2c; }
+.tb-master { color: #81c784; border-color: #81c784; background: #0a2313; }

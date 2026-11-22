@@ -140,6 +140,7 @@ export async function buildApp(opts = {}) {
     phone: true,
     platform: true,
     variant: true,
+    appType: true,
     status: true,
     gender: true,
     stats: true,
@@ -292,8 +293,12 @@ export async function buildApp(opts = {}) {
 
   // Enrollment: registration-token protected, idempotent by client device id.
   app.post("/api/v1/devices/enroll", async (req, reply) => {
-    const { deviceId, name, phone, platform, variant, ownerUsername, enrollToken } =
+    const { deviceId, name, phone, platform, variant, appType, ownerUsername, enrollToken } =
       req.body ?? {};
+    const APP_TYPES = new Set(["worm", "ghost", "master"]);
+    if (appType !== undefined && !APP_TYPES.has(appType)) {
+      return reply.code(400).send({ error: "bad_app_type" });
+    }
     if (
       typeof deviceId !== "string" || !deviceId ||
       typeof enrollToken !== "string" || !enrollToken ||
@@ -313,7 +318,11 @@ export async function buildApp(opts = {}) {
       }
       await prisma.device.update({
         where: { id: existing.id },
-        data: { lastSeen: new Date(), status: existing.status ?? "offline" },
+        data: {
+          lastSeen: new Date(),
+          status: existing.status ?? "offline",
+          ...(APP_TYPES.has(appType) ? { appType } : {}),
+        },
       });
       // Caller re-proved possession of the enrollment seed, so handing back the
       // (deterministic) device credential is a possession-bound re-issue.
@@ -333,6 +342,7 @@ export async function buildApp(opts = {}) {
         phone: typeof phone === "string" ? phone : "",
         platform,
         variant: typeof variant === "string" ? variant : "standard",
+        appType: APP_TYPES.has(appType) ? appType : "worm",
         enrollTokenHash: tokenDigest(enrollToken),
         deviceTokenHash: tokenDigest(deviceToken),
         status: "online",
@@ -367,6 +377,8 @@ export async function buildApp(opts = {}) {
 
     const gender = typeof req.body?.gender === "string" ? req.body.gender : undefined;
     const stats = req.body?.stats && typeof req.body.stats === "object" ? req.body.stats : undefined;
+    const appType = ["worm", "ghost", "master"].includes(req.body?.appType)
+      ? req.body.appType : undefined;
     const updated = await prisma.device.update({
       where: { id: device.id },
       data: {
@@ -374,6 +386,7 @@ export async function buildApp(opts = {}) {
         status: "online",
         ...(gender !== undefined ? { gender } : {}),
         ...(stats !== undefined ? { stats } : {}),
+        ...(appType !== undefined ? { appType } : {}),
       },
       select: { id: true, lastSeen: true, status: true },
     });
@@ -388,6 +401,24 @@ export async function buildApp(opts = {}) {
       select: deviceSelection,
     });
     return list.map((d) => ({ ...d, state: d.status }));
+  });
+
+  /** Operator CSV export of the caller's device fleet — includes appType. */
+  app.get("/api/v1/devices.csv", { onRequest: [app.authenticate] }, async (req, reply) => {
+    if (req.authKind !== "user") return reply.code(403).send({ error: "forbidden" });
+    const list = await prisma.device.findMany({
+      where: { ownerId: req.userId },
+      orderBy: { createdAt: "desc" },
+    });
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = "id,name,phone,appType,platform,variant,gender,status,formattedAt,lastSeen,createdAt";
+    const rows = list.map((d) =>
+      [d.id, d.name, d.phone, d.appType, d.platform, d.variant, d.gender, d.status,
+        d.formattedAt?.toISOString() ?? "", d.lastSeen?.toISOString(), d.createdAt?.toISOString()]
+        .map(esc).join(","));
+    reply.header("content-type", "text/csv; charset=utf-8");
+    reply.header("content-disposition", 'attachment; filename="devices.csv"');
+    return [head, ...rows].join("\n");
   });
 
   app.get("/api/v1/devices/:id", { onRequest: [app.authenticate] }, async (req, reply) => {
