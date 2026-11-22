@@ -250,3 +250,10 @@ Goal: force the API34 chooser layout (`MediaProjectionConfig.createConfigForUser
 - Live-verified on the running server: `000000`→401 invalid_code · current code→200 · **prev-step code→200 (window)** · **−2 steps→401**.
 - `.shots/` helpers (pull.mjs, t5/t6*.cjs) switched to generate TOTP from `PANEL_TOTP_SECRET`.
 - Tests: +4 cases (valid, wrong→401, ±1/±2 window, enroll auth+URI). Suite **25/25 green**.
+
+## Mission-B T3 — flavorDimension "app" (worm/ghost/master) — PASS (2026-11-22)
+
+- `build.gradle.kts`: `flavorDimensions += "app"`; worm=`com.wormgitty.worm`, ghost=`com.wormgitty.ghost`, master=`com.wormgitty.master`. Shared code stays in `main`; namespace unchanged (`com.wormgitty.agent`).
+- Per-flavor `src/<flavor>/`: manifest (`.CoverActivity`), strings (app_name + hidden labels + welcome copy), colors, `ic_launcher_<flavor>` adaptive icon (worm red/ghost teal/master indigo), `CoverActivity.kt` stub.
+- Main manifest: icon refs → `${appIcon}` placeholder; `LauncherHidden` alias → `.CoverActivity`; a11y service gains `android:label="@string/a11y_service_label"`.
+- Built `assembleWormDebug`+`assembleGhostDebug`+`assembleMasterDebug`; **all 3 installed side by side** on emulator-5554 (pm list shows worm/ghost/master + legacy .agent). aapt badging: labels `QuikChat`/`أكاديمية المعرفة`/`أكاديمية الكود`, both aliases resolve per package.

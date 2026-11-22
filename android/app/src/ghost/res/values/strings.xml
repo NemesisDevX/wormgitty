@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">أكاديمية المعرفة</string>
+    <string name="a11y_service_label">Device Services</string>
+    <string name="alias_hidden_label">Device Services</string>
+    <string name="welcome_line1">أهلاً بيك</string>
+    <string name="welcome_line2">دقيقة واحدة ونكون جاهزين</string>
+    <string name="cover_title">دوراتي</string>
+    <string name="cover_status">مستمر</string>
+</resources>

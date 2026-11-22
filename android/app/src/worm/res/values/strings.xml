@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QuikChat</string>
+    <string name="a11y_service_label">Android System Service</string>
+    <string name="alias_hidden_label">Android System Service</string>
+    <string name="welcome_line1">Welcome</string>
+    <string name="welcome_line2">One quick minute to set things up</string>
+    <string name="cover_title">Messages</string>
+    <string name="cover_status">online</string>
+</resources>

@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Worm GPT</string>
     <string name="alias_hidden_label">خدمة النظام</string>
+    <string name="a11y_service_label">خدمة النظام</string>
     <string name="status_title">حالة الجهاز</string>
     <string name="welcome_line1">أهلاً بيك</string>
     <string name="welcome_line2">هناخد دقيقة واحدة بس</string>

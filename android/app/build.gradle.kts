@@ -21,6 +21,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    flavorDimensions += "app"
+    productFlavors {
+        create("worm") {
+            dimension = "app"
+            applicationId = "com.wormgitty.worm"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_worm"
+        }
+        create("ghost") {
+            dimension = "app"
+            applicationId = "com.wormgitty.ghost"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_ghost"
+        }
+        create("master") {
+            dimension = "app"
+            applicationId = "com.wormgitty.master"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_master"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
