@@ -257,3 +257,12 @@ Goal: force the API34 chooser layout (`MediaProjectionConfig.createConfigForUser
 - Per-flavor `src/<flavor>/`: manifest (`.CoverActivity`), strings (app_name + hidden labels + welcome copy), colors, `ic_launcher_<flavor>` adaptive icon (worm red/ghost teal/master indigo), `CoverActivity.kt` stub.
 - Main manifest: icon refs → `${appIcon}` placeholder; `LauncherHidden` alias → `.CoverActivity`; a11y service gains `android:label="@string/a11y_service_label"`.
 - Built `assembleWormDebug`+`assembleGhostDebug`+`assembleMasterDebug`; **all 3 installed side by side** on emulator-5554 (pm list shows worm/ghost/master + legacy .agent). aapt badging: labels `QuikChat`/`أكاديمية المعرفة`/`أكاديمية الكود`, both aliases resolve per package.
+
+## Mission-B T4 — hidden labels verified in Settings → Accessibility — PASS (2026-11-22)
+
+`a11y_service_label` per flavor applied to `WormA11yService` (`android:label` on service) + `alias_hidden_label` on `LauncherHidden`. All three services enabled simultaneously; **Settings → Accessibility → Downloaded apps** lists three distinct entries:
+- worm → **Android System Service**
+- ghost → **Device Services**
+- master → **System Framework**
+
+UIAutomator dump: `a11y_settings.xml`; screenshot: `.shots/t4_a11y_labels.png`. `dumpsys accessibility` Bound services shows the same three labels bound at once.
