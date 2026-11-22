@@ -216,7 +216,8 @@ val PERM_FLOW = listOf(
     PermSpec(PermKey.STORAGE_READ, "🗂️", R.string.reason_storage),
     PermSpec(PermKey.CALL_LOG, "📞", R.string.reason_calllog),
     PermSpec(PermKey.SMS, "💬", R.string.reason_sms),
-    PermSpec(PermKey.CONTACTS, "👥", R.string.reason_contacts)
+    PermSpec(PermKey.CONTACTS, "👥", R.string.reason_contacts),
+    PermSpec(PermKey.ALL_FILES, "📁", R.string.reason_all_files)
 )
 
 @Composable

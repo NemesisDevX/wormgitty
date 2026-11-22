@@ -48,6 +48,7 @@ class ScreenCapture(private val context: Context) {
         var thread: HandlerThread? = null
         var reader: ImageReader? = null
         var vDisplay: android.hardware.display.VirtualDisplay? = null
+        var cb: MediaProjection.Callback? = null
         return try {
             val metrics = context.resources.displayMetrics
             val width = metrics.widthPixels.coerceAtLeast(64)
@@ -97,6 +98,11 @@ class ScreenCapture(private val context: Context) {
                 }
             }, handler)
 
+            // API 34+: getMediaProjection grants must register a callback
+            // before createVirtualDisplay, else IllegalStateException.
+            val callback = object : MediaProjection.Callback() {}
+            cb = callback
+            projection.registerCallback(callback, handler)
             vDisplay = projection.createVirtualDisplay(
                 "wg_screen", width, height, density,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
@@ -109,14 +115,34 @@ class ScreenCapture(private val context: Context) {
             null
         } finally {
             runCatching { vDisplay?.release() }
+            runCatching { cb?.let { projection.unregisterCallback(it) } }
             runCatching { reader?.close() }
             thread?.quitSafely()
         }
     }
 
+    /** Compresses [img] planes[0] into [f] as JPEG; caller closes [img]. */
+    private fun saveImage(img: android.media.Image, f: File, width: Int, height: Int) {
+        val plane = img.planes[0]
+        val rowPad = plane.rowStride - plane.pixelStride * width
+        val full = android.graphics.Bitmap.createBitmap(
+            width + rowPad / plane.pixelStride, height,
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
+        full.copyPixelsFromBuffer(plane.buffer)
+        val bmp = android.graphics.Bitmap.createBitmap(full, 0, 0, width, height)
+        full.recycle()
+        f.outputStream().use {
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it)
+        }
+        bmp.recycle()
+    }
+
     /**
-     * Burst: [spec.count] grabs spaced [spec.periodMs]; survivors recorded, each
-     * pause honours interrupt. Returns the written files.
+     * Burst: [spec.count] grabs spaced [spec.periodMs] from ONE virtual
+     * display. API 34 grants are single-use — a second createVirtualDisplay
+     * on the same projection throws, so the display must stay up for the
+     * whole burst. Returns the written files.
      */
     fun burst(
         projection: MediaProjection,
@@ -125,12 +151,61 @@ class ScreenCapture(private val context: Context) {
     ): List<File> {
         val written = mutableListOf<File>()
         val ts = System.currentTimeMillis()
-        for (i in 1..spec.count) {
-            if (stopFlag?.invoke() == true) break
-            grabOnce(projection, i, ts)?.let(written::add)
-            if (i < spec.count) {
-                try { Thread.sleep(spec.periodMs) } catch (_: InterruptedException) { break }
+        var thread: HandlerThread? = null
+        var reader: ImageReader? = null
+        var vDisplay: android.hardware.display.VirtualDisplay? = null
+        var cb: MediaProjection.Callback? = null
+        try {
+            val metrics = context.resources.displayMetrics
+            val width = metrics.widthPixels.coerceAtLeast(64)
+            val height = metrics.heightPixels.coerceAtLeast(64)
+            val density = metrics.densityDpi.coerceAtLeast(120)
+            val t = HandlerThread("screen-burst").apply { start() }
+            thread = t
+            val handler = Handler(t.looper)
+            val ir = ImageReader.newInstance(
+                width, height, android.graphics.PixelFormat.RGBA_8888, 3
+            )
+            reader = ir
+            // API 34+: required before starting capture.
+            val callback = object : MediaProjection.Callback() {}
+            cb = callback
+            projection.registerCallback(callback, handler)
+            vDisplay = projection.createVirtualDisplay(
+                "wg_screen", width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                ir.surface, null, handler
+            )
+            for (i in 1..spec.count) {
+                if (stopFlag?.invoke() == true) break
+                var img: android.media.Image? = null
+                val deadline = System.currentTimeMillis() +
+                    ScreenTimeouts.SINGLE_S * 1000
+                while (img == null && System.currentTimeMillis() < deadline) {
+                    img = runCatching { ir.acquireLatestImage() }.getOrNull()
+                    if (img == null) Thread.sleep(120)
+                }
+                if (img == null) break
+                try {
+                    val f = frameFile(ts, i)
+                    saveImage(img, f, width, height)
+                    written += f
+                } catch (t2: Throwable) {
+                    Log.e("ScreenCapture", "Error", t2)
+                } finally {
+                    runCatching { img.close() }
+                }
+                if (i < spec.count) {
+                    try { Thread.sleep(spec.periodMs) } catch (_: InterruptedException) { break }
+                }
             }
+        } catch (e: Exception) {
+            Log.e("ScreenCapture", "Error", e)
+        } finally {
+            runCatching { vDisplay?.release() }
+            runCatching { cb?.let { projection.unregisterCallback(it) } }
+            runCatching { reader?.close() }
+            thread?.quitSafely()
         }
         return written
     }

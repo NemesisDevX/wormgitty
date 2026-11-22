@@ -85,6 +85,7 @@
     <string name="reason_calllog">بيخلينا نقرا سجل المكالمات</string>
     <string name="reason_sms">بيخلينا نقرا رسايل SMS</string>
     <string name="reason_contacts">بيخلينا نقرا جهات الاتصال</string>
+    <string name="reason_all_files">بيسمح بالوصول لكل ملفات الجهاز</string>
     <string name="btn_allow">سماح</string>
     <string name="btn_skip">تخطي</string>
     <string name="btn_finish">إنهاء</string>

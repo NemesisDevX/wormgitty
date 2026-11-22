@@ -23,6 +23,15 @@ class ConsentActivity : Activity() {
         } catch (_: Exception) {
             finish()
         }
+        // A blocked/invisible launch never produces a result — self-finish so
+        // stale consent tasks don't stack up behind newer attempts.
+        android.os.Handler(mainLooper).postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                GrantBus.result = GrantBus.result ?: false
+                GrantBus.latch.countDown()
+                finish()
+            }
+        }, 25_000)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
