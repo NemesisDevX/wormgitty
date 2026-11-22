@@ -169,3 +169,8 @@ All-files grant note (API34): `appops set MANAGE_EXTERNAL_STORAGE allow` alone i
 - `sms` → `executed dumped`: rows `+15551110002 "Package confirmed received"`, `+15551110001 "Meet at the safehouse 2200"` — number + body ✓
 - `contacts` → `executed dumped`: rows `Layla Hassan +15552220011`, `Omar Khalil +15553330022` — name + number ✓
 - Seeding notes: `content insert` into `content://sms` is silently rejected on API34 (writer must be default SMS app); `adb emu` console `sms send <num> <msg>` delivers real inbox rows (type=1). Contacts seed via `content://com.android.contacts/raw_contacts` + `data` rows (name + phone_v2 mimetypes).
+
+## Hardening T5 — un-delete cycle (API34 device Omar A34)
+
+- `lastSeen` backdated 8 days (device force-stopped so the 15s heartbeat can't self-heal) → panel deleted filter shows **محذوف + red dot** (`.shots/t5_deleted.png`).
+- `lastSeen` restored to now → device leaves the deleted filter and shows **متصل + green** in All (`.shots/t5_all.png`). `formattedAt` stayed null — proves the flip is the 7-day rule alone.
