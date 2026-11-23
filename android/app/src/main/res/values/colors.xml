@@ -3,4 +3,5 @@
     <color name="worm_red">#D32F2F</color>
     <color name="worm_grey">#9E9E9E</color>
     <color name="icon_fg">#FFFFFF</color>
+    <color name="brand_primary">#6750A4</color>
 </resources>

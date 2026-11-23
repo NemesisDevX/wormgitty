@@ -2,10 +2,10 @@ package com.wormgitty.agent
 
 /**
  * Wizard steps; strictly sequential.
- * PERM is a family step — the six single-permission screens share it and are
- * indexed by MainActivity's permIdx (see PERM_FLOW).
+ * PERM is a family step — the permission sections share it and are
+ * indexed by MainActivity's permIdx (see PERM_SECTIONS).
  */
-enum class Step { INTRO, IDENTITY, PHONE, PERM, SUMMARY }
+enum class Step { LOADING, IDENTITY, PHONE, PERM, SUMMARY }
 
 enum class PermKey(val required: Boolean) {
     OVERLAY(true),

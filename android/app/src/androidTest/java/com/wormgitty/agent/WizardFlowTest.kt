@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -20,8 +21,8 @@ import org.junit.runner.RunWith
 import java.util.concurrent.TimeUnit
 
 /**
- * End-to-end happy path on the current wizard: INTRO -> IDENTITY -> PHONE ->
- * 9 perm screens (skipped, mock perms) -> SUMMARY -> finish. With mock_perms the
+ * End-to-end happy path on the current wizard: LOADING -> IDENTITY -> PHONE ->
+ * permission sections (skipped, mock perms) -> SUMMARY -> finish. With mock_perms the
  * transport is FakeRegistrationApi, so the seal succeeds offline and runs the
  * vanish NOW (veil -> aliases off -> clear pendingHide -> finish).
  */
@@ -43,8 +44,11 @@ class WizardFlowTest {
         val intent = Intent(context, MainActivity::class.java)
             .putExtra(MainActivity.EXTRA_MOCK_PERMS, true)
         ActivityScenario.launch<MainActivity>(intent).use {
-            compose.waitForIdle()
-            compose.onNodeWithTag("next_intro").performClick()
+            // LOADING auto-advances to IDENTITY after ~1.8s — wait for a laid-out node.
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithTag("name_input").fetchSemanticsNodes()
+                    .any { it.boundsInRoot.width > 0f && it.boundsInRoot.height > 0f }
+            }
             compose.waitForIdle()
 
             compose.onNodeWithTag("name_input").performTextInput("اختبار")
@@ -57,10 +61,13 @@ class WizardFlowTest {
             compose.onNodeWithTag("phone_input").performTextInput("01012345678")
             compose.waitForIdle()
             compose.onNodeWithTag("next_phone").performClick()
-            compose.waitForIdle()
 
-            // 9 perm screens — skip each.
-            repeat(PERM_FLOW.size) {
+            // Permission sections — wait for each section's skip button, then skip.
+            repeat(PERM_SECTIONS.size) {
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithTag("perm_skip").fetchSemanticsNodes()
+                        .any { it.boundsInRoot.width > 0f }
+                }
                 compose.waitForIdle()
                 compose.onNodeWithTag("perm_skip").performClick()
             }

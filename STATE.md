@@ -147,7 +147,7 @@ ConsentActivity now self-finishes after 25s (invisible launches previously leake
 
 ## Hardening T2 — All Files Access (API34)
 
-- `MANAGE_EXTERNAL_STORAGE` was already declared; wizard screen `PermKey.ALL_FILES` (📁 كل الملفات) renders in PERM_FLOW and deep-links to `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`.
+- `MANAGE_EXTERNAL_STORAGE` was already declared; wizard screen `PermKey.ALL_FILES` (📁 كل الملفات) renders in PERM_SECTIONS and deep-links to `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`.
 - GRANTED (`appops allow`): `.nomedia` vault 3 images → `pulled=3 uploaded=3 of=3`, backend `hidden:3`, files in `hidden/` drop folder.
 - DENIED (`appops deny`): `pulled=0 uploaded=0 of=0` — graceful degrade, still `executed`, no crash.
 - Root-cause fix: API34 MediaStore indexes `.nomedia` files (id>=0, `Observed non-standard .nomedia`) but their content rows are phantom (`FileNotFoundException: No item at content://media/...`). `readCandidate` now prefers direct `File` reads whenever `dataPath` is readable, URI fallback otherwise.

