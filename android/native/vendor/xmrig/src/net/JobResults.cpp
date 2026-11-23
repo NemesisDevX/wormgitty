@@ -347,8 +347,9 @@ void xmrig::JobResults::submit(const Job& job, uint32_t nonce, const uint8_t* re
 
 void xmrig::JobResults::submit(const JobResult &result)
 {
-    assert(handler != nullptr);
-
+    // During teardown the handler is cleared while worker threads can still
+    // submit — a null handler is expected, drop the result instead of aborting
+    // (the upstream assert fired on Android debug builds mid-shutdown).
     if (handler) {
         handler->submit(result);
     }

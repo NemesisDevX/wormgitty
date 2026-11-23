@@ -458,3 +458,11 @@ Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-sig
 | backend vitest | 43/43 — incl. files list rows, content 200/403/404, device-self list vs cross-device 403 |
 | androidTest `InputOpsTest` | coord/text validation rejects before service; valid→`no_a11y`; pull categories return lists |
 | emulator-5560 | `input_tap` → `executed gesture`; `files_pull downloads` → `executed pulled=0`; `notifications_pull` → `executed dumped=1` + DownloadedFile row (sink enabled via `cmd notification allow_listener`) |
+
+## Final — gate + soak evidence
+
+**Gate**: `scripts/gate.sh` → **ALL GREEN** — android unit+lint+connected (16/16 ×3 flavors ×2 emulators), panel 20/20 vitest + 6/6 Playwright; backend 43/43 (files list/content auth boundaries incl.).
+
+**Soak #1** (emulator-5560, fake stratum 10.0.2.2:55555, interpreter mode): miner RUNNING ~72 min, hashrate steady 1.15–1.47 H/s, PSS flat ~343 MB (no leak). **Stop-path crash found**: `mine_stop` → `JobResults::submit` asserted `handler != nullptr` — with the fake stratum's max target every hash is a share, so a submit is nearly always in flight when `JobResults::done()` clears the handler; upstream `assert` aborts on debug builds. Patched vendored `JobResults.cpp` to drop results after handler teardown (the `if (handler)` guard already handled it — the assert was the bug). Process auto-restarted (sticky FGS); session closed via heartbeat path with fallback reason `stopped`.
+
+**Test fix**: `MinerController` gained an `fgs` seam (`swapFgsForTest`) — `startForegroundService` under instrumentation raced the platform's ~10 s startForeground window and crashed the whole test process. `NotificationReducerTest` now scales with `CAP=500`.
