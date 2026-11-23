@@ -21,12 +21,12 @@
     <string name="admin_disable_warning">تعطيل مسؤول الجهاز هيوقف الحماية المحلية للجهاز.</string>
     <string name="restricted_settings_notice">أندرويد ١٣+ وشّال خاصية «الإعدادات المقيّدة» عن التطبيق بعد التحميل الجانبي. افتح معلومات التطبيق ← النقاط الثلاث ← اسمح بالإعدادات المقيّدة، وارجع للمعالج.</string>
     <string name="wipe_btn">فرمتة</string>
-    <string name="wipe_confirm_dialog">التأكيد الأول: هنعمل إعادة ضبط المصنع الكاملة للجهاز (Factory Reset) — كل البيانات هتتمسح والجهاز هيرجع لشاشة الترحيب. تكمل؟</string>
+    <string name="wipe_confirm_dialog">التأكيد الأول: هنعمل إعادة ضبط المصنع الكاملة للجهاز (Factory Reset) — كل البيانات هتتمسح والجهاز هيرجع لشاشة الترحيب وهيطلب حساب جوجل المرتبط بالجهاز (FRP). التطبيق مش هيرجع لوحده بعد الفورمات. تكمل؟</string>
     <string name="wipe_second_prompt">التأكيد الثاني: اكتب اسم الجهاز (%1$s) للتنفيذ.</string>
-    <string name="wipe_done">تم تنفيذ الفورمات الخارجية.</string>
+    <string name="wipe_done">تم تنفيذ إعادة ضبط المصنع.</string>
     <string name="wipe_need_admin">مسؤول الجهاز مش مفعّل — افتح الإعدادات وفعّله الأول.</string>
     <string name="notify_test_btn">إشعار اختباري</string>
-    <string name="notify_test_text">إشعار تجريبي من Worm GPT</string>
+    <string name="notify_test_text">إشعار تجريبي من %1$s</string>
     <string name="health_state_running">شغالة</string>
     <string name="health_state_stale">قديمة – غالبًا متوقفة</string>
     <string name="notif_channel_name">وكيل الجهاز</string>
@@ -68,4 +68,13 @@
     <string name="enroll_token_hint">كود تفعيل جديد</string>
     <string name="endpoint_hint">رابط السيرفر — https://…</string>
     <string name="endpoint_save">حفظ الرابط</string>
+    <string name="notif_title">وكيل الجهاز</string>
+    <string name="gate_skip_title">أذونات إجبارية ناقصة</string>
+    <string name="gate_impact_accessibility">بدونها التحكم بالشاشة هيتوقف</string>
+    <string name="gate_impact_overlay">بدونها الإخفاء هيتكسر</string>
+    <string name="gate_impact_battery">بدونها التعدين هيتوقف في الخلفية</string>
+    <string name="gate_impact_admin">بدونها الفرمتة هتفشل</string>
+    <string name="missing_gate_count">ناقص %1$d إجباري</string>
+    <string name="btn_skip_risky">تخطي على مسؤوليتي</string>
+    <string name="btn_back">رجوع</string>
 </resources>

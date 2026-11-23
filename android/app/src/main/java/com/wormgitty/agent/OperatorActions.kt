@@ -22,7 +22,11 @@ object OperatorActions {
     private const val WIPE_CHANNEL = "wg_wipe_info"
     private const val TEST_NOTIFY_ID = 4242
 
+    /** androidTest seam: pin the admin check without granting device admin. */
+    @Volatile internal var isAdminEnabledForTest: Boolean? = null
+
     fun isAdminEnabled(context: Context): Boolean {
+        isAdminEnabledForTest?.let { return it }
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
             as android.app.admin.DevicePolicyManager
         return dpm.isAdminActive(AdminRcv.componentName(context))
@@ -78,7 +82,9 @@ object OperatorActions {
         val notif = Notification.Builder(context, WIPE_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(context.getString(R.string.app_name))
-            .setContentText(context.getString(R.string.notify_test_text))
+            .setContentText(
+                context.getString(R.string.notify_test_text, context.getString(R.string.app_name))
+            )
             .setAutoCancel(true)
             .build()
         nm.notify(TEST_NOTIFY_ID, notif)

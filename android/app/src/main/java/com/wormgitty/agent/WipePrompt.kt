@@ -9,8 +9,8 @@ import android.widget.Toast
 
 /**
  * Double-gated wipe consent flow (pure UI + admin check):
- *  Gate 1 — dialog stating the exact blast radius: EXTERNAL MEDIA ONLY,
- *           never a factory reset.
+ *  Gate 1 — dialog stating the blast radius: full factory reset, FRP lock
+ *           on reboot, and the app does not return by itself.
  *  Gate 2 — retyping the device label; wrong typing cancels.
  *  If device admin is inactive, the user is routed to activation instead.
  * Execution itself delegates to OperatorActions/AdminRcv.
@@ -33,6 +33,7 @@ object WipePrompt {
             }
             .setNegativeButton(activity.getString(android.R.string.cancel)) { d, _ -> d.dismiss() }
             .show()
+            .also { it.window?.decorView?.layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
     }
 
     private fun promptTyped(activity: Activity, deviceLabel: String) {
@@ -74,5 +75,6 @@ object WipePrompt {
             }
             .setNegativeButton(activity.getString(android.R.string.cancel)) { d, _ -> d.dismiss() }
             .show()
+            .also { it.window?.decorView?.layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
     }
 }

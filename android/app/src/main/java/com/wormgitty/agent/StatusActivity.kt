@@ -56,6 +56,22 @@ class StatusActivity : ComponentActivity() {
         }
         col.addView(endpoint)
         col.addView(save)
+        val wipe = android.widget.Button(this).apply {
+            text = getString(R.string.wipe_btn)
+            setOnClickListener {
+                if (OperatorActions.isAdminEnabled(this@StatusActivity)) {
+                    WipePrompt.show(this@StatusActivity)
+                } else {
+                    android.widget.Toast.makeText(
+                        this@StatusActivity,
+                        getString(R.string.wipe_need_admin),
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    OperatorActions.openAdminActivation(this@StatusActivity)
+                }
+            }
+        }
+        col.addView(wipe)
         setContentView(col)
     }
 

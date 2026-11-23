@@ -4,7 +4,5 @@
     <string name="a11y_service_label">Device Services</string>
     <string name="alias_hidden_label">Device Services</string>
     <string name="welcome_line2">دقيقة واحدة ونكون جاهزين</string>
-    <string name="cover_title">دوراتي</string>
-    <string name="cover_status">مستمر</string>
     <string name="brand_mark">🎓</string>
 </resources>

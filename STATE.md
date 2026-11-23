@@ -472,3 +472,19 @@ Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-sig
 **Soak #3** (same setup): full 60 min RUNNING, hashrate 1.26–1.47 H/s, PSS flat ~325 MB end-to-end. `mine_stop` → `STOPPING` → `STOPPED`, session `stopReason=manual`. Crash buffer shows only the pre-fix soak-#1 abort; no new tombstone.
 
 **Soak summary**: #1 exposed the `JobResults::submit` shutdown-race assert (fixed in efd49cb); #2 and #3 ran the full 60 min with nonzero hashrate, stable memory, and clean manual stops. Spec satisfied: 3×60-min soaks, hashing verified, no leaks, clean start/stop.
+
+## Strings-audit remediation — gates, wipe wiring, worm leak
+
+**Gate enforcement**: `PermKey.gateImpactRes` per gate key + `missingGates(states)`. Protection-section skip now opens an impact dialog (name + consequence per missing gate: screen control / hiding / background mining / wipe), with "تخطي على مسؤوليتي" as the explicit escape and "رجوع" back. Skip button shows "ناقص N إجباري" while gates are missing. Non-gate sections keep free skip. Summary renders each missing gate in red with its impact.
+
+**Wipe wiring**: `StatusActivity` gained the `wipe_btn` → `WipePrompt.show()` path (admin check first → `wipe_need_admin` + activation intent otherwise). `wipe_confirm_dialog` now states FRP lock + no app return; `wipe_done` corrected to "تم تنفيذ إعادة ضبط المصنع." Both WipePrompt dialogs + the restricted-settings notice force RTL decorView so Arabic reads correctly on LTR devices.
+
+**Worm leak closed**: all 21 non-overridden main keys got English overrides (incl. `dev_footer`). Notification title split into `notif_title` (channel name stays `notif_channel_name`). `notify_test_text` is now `إشعار تجريبي من %1$s` / "Test notification from %1$s" — drops the stale "Worm GPT" brand in all flavors. Dead `cover_title`/`cover_status` removed from all three flavors.
+
+**Tests**: `StringResourcesTest` (unit) — worm must override every main key; no dead keys; all gates declare an impact. `WizardFlowTest` — `skipWithAllGrantedAdvancesExactlyOneSection` (remember-key regression) + `gateSectionSkipNeedsExplicitConfirm` (dialog blocks until confirm, red rows in summary). `WipeFlowTest` — button → double-gated dialog when admin on (seam `isAdminEnabledForTest`), no dialog when off. `GateDeniedChecker` + `EXTRA_DENY_GATES` test seam.
+
+**Verified**: unit 96/96; instrumented via `am instrument` on emulator-5556 — WizardFlowTest 3/3 ×3 flavors, WipeFlowTest 2/2. Shots in `.shots/`: `gate_dialog_worm/ghost`, `summary_red_worm`, `worm_ar_locale` (English-only on ar-EG), `wipe_dialog_worm`.
+
+**Gate (final, 2026-11-23)**: `scripts/gate.sh` → **ALL GREEN** on emulator-5556 (Pixel_API33_2GB) — android unit+lint+`connected{Worm,Ghost,Master}DebugAndroidTest` (20/20 per flavor) + panel 20/20 vitest + 6/6 Playwright. Two env fixes made it stable: suppress ANR dialogs on the emu (`anr_show_dialog=0` — SystemUI kept ANR-stealing window focus), and `performScrollTo()` before `perm_skip` clicks in `WizardFlowTest` (the protection section overflows the viewport — the skip row's semantics node exists below the fold and its click silently no-ops until scrolled into view; ~25% flake before the fix, 5/5 clean iterations after).
+
+Note: BlueStacks (emulator-5554) keeps re-registering itself in adb and breaking ddmlib `services()` calls — connected-test Gradle tasks race with it; `am instrument` runs are the stable path while it's up.

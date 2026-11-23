@@ -44,7 +44,7 @@ class WormSvc : Service() {
         HealthStore.write(this, HealthState(HealthStore.STATE_STARTED, now, now))
         val notif: Notification =
             Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle(getString(R.string.notif_channel_name))
+                .setContentTitle(getString(R.string.notif_title))
                 .setContentText(getString(R.string.notif_service_text))
                 .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
                 .setOngoing(true)
