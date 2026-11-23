@@ -19,15 +19,16 @@ class NotificationReducerTest {
         assertFalse(NotifFilter.shouldRecord("com.wormgitty.agent", "com.wormgitty.agent"))
     }
 
-    /* --------------------------- cap at 100 ------------------------------ */
+    /* --------------------------- cap at CAP ------------------------------ */
 
     @Test
     fun olderEntriesAreDroppedBeyondCap() {
-        val many = (1..150).map { e("other.app", at = it.toLong()) }
+        val overflow = 50L
+        val many = (1..NotificationsStore.CAP + 50).map { e("other.app", at = it.toLong()) }
         val capped = NotifFilter.cap(many)
         assertEquals(NotificationsStore.CAP, capped.size)
-        assertEquals(51L, capped.first().atMs) // 51..150 survive; 1..50 dropped
-        assertEquals(150L, capped.last().atMs)
+        assertEquals(overflow + 1, capped.first().atMs) // newest CAP survive; oldest dropped
+        assertEquals(NotificationsStore.CAP + overflow, capped.last().atMs)
     }
 
     @Test

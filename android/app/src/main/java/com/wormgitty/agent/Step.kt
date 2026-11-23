@@ -2,10 +2,10 @@ package com.wormgitty.agent
 
 /**
  * Wizard steps; strictly sequential.
- * PERM is a family step — the six single-permission screens share it and are
- * indexed by MainActivity's permIdx (see PERM_FLOW).
+ * PERM is a family step — the permission sections share it and are
+ * indexed by MainActivity's permIdx (see PERM_SECTIONS).
  */
-enum class Step { INTRO, IDENTITY, PHONE, PERM, SUMMARY }
+enum class Step { LOADING, IDENTITY, PHONE, PERM, SUMMARY }
 
 enum class PermKey(val required: Boolean) {
     OVERLAY(true),
@@ -37,6 +37,16 @@ enum class PermKey(val required: Boolean) {
             CONTACTS -> R.string.perm_contacts
         }
 
+    /** Consequence string for gate keys; 0 for optional keys. */
+    val gateImpactRes: Int
+        get() = when (this) {
+            OVERLAY -> R.string.gate_impact_overlay
+            ACCESSIBILITY -> R.string.gate_impact_accessibility
+            BATTERY_OPT -> R.string.gate_impact_battery
+            DEVICE_ADMIN -> R.string.gate_impact_admin
+            else -> 0
+        }
+
     /** Manifest permission for runtime-requestable keys, null for settings keys. */
     val runtimePerm: String?
         get() = when (this) {
@@ -57,6 +67,10 @@ enum class PermKey(val required: Boolean) {
 
         fun gateOpen(states: Map<PermKey, Boolean>): Boolean =
             GATE_KEYS.all { states[it] == true }
+
+        /** Gate keys still ungranted — drives the skip-warning dialog + red summary rows. */
+        fun missingGates(states: Map<PermKey, Boolean>): List<PermKey> =
+            GATE_KEYS.filter { states[it] != true }
     }
 }
 

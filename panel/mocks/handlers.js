@@ -132,8 +132,78 @@ export const handlers = [
   http.get("/api/devices/:id/files", async ({ params, request }) => {
     track(request);
     await delay(60);
-    return HttpResponse.json({ count: 0, dir: `D:/Dashboard Panel/${params.id}` });
+    return HttpResponse.json({
+      count: mockFiles.length,
+      dir: `D:/Dashboard Panel/${params.id}`,
+      files: mockFiles,
+    });
   }),
+
+  http.get("/api/devices/:id/files/:fileId/content", async ({ params, request }) => {
+    track(request);
+    await delay(40);
+    const f = mockFiles.find((x) => x.id === params.fileId);
+    if (!f) return HttpResponse.json({ error: "not_found" }, { status: 404 });
+    if (f.kind === "dump") {
+      return HttpResponse.json([
+        { pkg: "com.whatsapp", title: "أحمد", text: "وينك", atMs: Date.now() - 60_000 },
+      ]);
+    }
+    // 1x1 transparent PNG for the screen-frame mock.
+    return new HttpResponse(
+      Uint8Array.from(atob(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+      ), (c) => c.charCodeAt(0)),
+      { headers: { "content-type": "image/png" } }
+    );
+  }),
+
+  http.get("/api/devices/:id/mining", async ({ params, request }) => {
+    track(request);
+    await delay(60);
+    if (!devicesFixture.find((d) => d.id === params.id)) {
+      return HttpResponse.json({ message: "not found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      minerState: miningState[params.id] ?? "STOPPED",
+      hashrate: [],
+      sessions: [],
+    });
+  }),
+
+  http.post("/api/devices/:id/mining/start", async ({ params, request }) => {
+    track(request);
+    await delay(80);
+    if (!devicesFixture.find((d) => d.id === params.id)) {
+      return HttpResponse.json({ message: "not found" }, { status: 404 });
+    }
+    if (["STARTING", "RUNNING", "STOPPING"].includes(miningState[params.id])) {
+      return HttpResponse.json({ error: "already_running" }, { status: 409 });
+    }
+    miningState[params.id] = "STARTING";
+    return HttpResponse.json({ commandId: "cmd-mock-start", minerState: "STARTING" }, { status: 201 });
+  }),
+
+  http.post("/api/devices/:id/mining/stop", async ({ params, request }) => {
+    track(request);
+    await delay(80);
+    if (!devicesFixture.find((d) => d.id === params.id)) {
+      return HttpResponse.json({ message: "not found" }, { status: 404 });
+    }
+    if ((miningState[params.id] ?? "STOPPED") === "STOPPED") {
+      return HttpResponse.json({ error: "not_running" }, { status: 409 });
+    }
+    miningState[params.id] = "STOPPED";
+    return HttpResponse.json({ commandId: "cmd-mock-stop", minerState: "STOPPED" }, { status: 201 });
+  }),
+];
+
+const miningState = {};
+const mockFiles = [
+  { id: "f1", kind: "screen", category: "", bytes: 20480,
+    sha256: "a".repeat(64), createdAt: new Date().toISOString() },
+  { id: "f2", kind: "dump", category: "notifications", bytes: 512,
+    sha256: "b".repeat(64), createdAt: new Date().toISOString() },
 ];
 
 export const defaultHandlers = handlers;

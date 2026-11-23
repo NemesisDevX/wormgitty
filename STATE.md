@@ -147,7 +147,7 @@ ConsentActivity now self-finishes after 25s (invisible launches previously leake
 
 ## Hardening T2 — All Files Access (API34)
 
-- `MANAGE_EXTERNAL_STORAGE` was already declared; wizard screen `PermKey.ALL_FILES` (📁 كل الملفات) renders in PERM_FLOW and deep-links to `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`.
+- `MANAGE_EXTERNAL_STORAGE` was already declared; wizard screen `PermKey.ALL_FILES` (📁 كل الملفات) renders in PERM_SECTIONS and deep-links to `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION`.
 - GRANTED (`appops allow`): `.nomedia` vault 3 images → `pulled=3 uploaded=3 of=3`, backend `hidden:3`, files in `hidden/` drop folder.
 - DENIED (`appops deny`): `pulled=0 uploaded=0 of=0` — graceful degrade, still `executed`, no crash.
 - Root-cause fix: API34 MediaStore indexes `.nomedia` files (id>=0, `Observed non-standard .nomedia`) but their content rows are phantom (`FileNotFoundException: No item at content://media/...`). `readCandidate` now prefers direct `File` reads whenever `dataPath` is readable, URI fallback otherwise.
@@ -357,3 +357,134 @@ Run sequentially (one heavy job at a time — box is 16 GB / ~2 GB free).
 - soak clean → **PASS** (30/30×3 pings, captures executed, 0 post-fix crashes, flat memory)
 - green → **PASS** (all suites above)
 - pushed → commits `86380dc` + STATE.md updates on `feat/identity-local`
+
+## Phase-1 — real enrollment + identity (feat/mvp-closeout)
+
+**Server** (`backend/src/server.js`, `prisma/migrations/20261122160000_p3_closeout`):
+- `POST /devices/enroll-token` (user) + `POST /devices/:id/enroll-token` mint 30-min single-use JWTs (`EnrollToken` row: jti/deviceId/ownerId/consumedAt/expiresAt); owner bound to issuer — never client-supplied.
+- `POST /devices/enroll` new path: JWT → consume → random 32B base64url credential → `credential_hash` = tokenDigest; response `{deviceId, credential}` once. Rejects expired/consumed/forged/device-mismatch (401/403), `bad_display_name`, `bad_phone` (400).
+- Legacy preserved behind `LEGACY_CREDENTIAL` (default true): plain token + ownerUsername enroll; `deviceTokenHash` fallback in authenticator marked `req.legacyCredential`. Cutoff plan in docs/OPS.md.
+- PII: `phone` stays `""`; AES-256-GCM `phone_enc` (key `PANEL_PII_KEY`); `phone_masked` e.g. `+201****5678`; `POST /devices/:id/phone/reveal` (user) → plaintext + `phone_reveal` audit.
+- `platform` String→enum (ANDROID…), `display_name`, `miner_state`, `last_hashrate`, `MiningSession` in same migration.
+
+**App**: `EnrollClient` (fingerprint+appType+platform payload), `ServerRegistrationApi` (RegistrationApi + EnrollTokenAware; token from `BuildConfig.WG_ENROLL_TOKEN`/intent extra/paste field), `IdentityVault` stores credential encrypted, `DeviceAuth` = vault credential → documented legacy fallback (sole `global-dev-seed` site), `WormSvc` refuses before credential-or-registration, SUMMARY failure UI = banner+retry+copy-token+paste field.
+
+**Fix**: launcher aliases referenced `$pkg.LauncherBoost` (applicationId) but classes live under `com.wormgitty.agent` — `setComponentEnabledSetting` threw `IllegalArgumentException` and crash-looped the vanish on every flavor. Fixed component names in `MainActivity.setAliases` + `StatusActivity` (bug existed since flavors got distinct applicationIds).
+
+**Verify**
+| Check | Result |
+|---|---|
+| vitest | 32/32 — new: JWT enroll ok (cred regex, hash-48 stored, phone empty/masked/enc), consumed→401, expired-row→401, forged-sig→401, bad name/phone→400, reveal→phone+`phone_reveal` audit, unknown cred→401 |
+| curl smoke | mint→enroll 201, reuse→401, hb(new cred)→200, hb(legacy)→401 when flag off, reveal→`+201012345678`, masked `+201****5678`, `phone=""` in row |
+| emulator e2e | emulator-5560 (fresh AVD; emulator-5554 is driven by external automation — focus theft + `pm uninstall`): minted token baked via `-PWG_ENROLL_TOKEN`, wizard driven by uiautomator taps → device `240d7ac42a…` enrolled `display_name="Omar Emu"`, `phone_masked="+201****5432"`, `phone=""`, `platform=ANDROID`, `app_type=worm`, `credential_hash` set; `last_seen` ticking (19:18:12→19:18:42) = heartbeats on the stored credential; aliases vanished post-seal. An earlier 5554 run also enrolled (`e2ba876f…`, name garbled by tap timing — input, not code). |
+| `git grep global-dev-seed` | server legacy path + `DeviceAuth` LEGACY_SEED + tests/docs only |
+
+## Phase-2 — remote endpoint + TLS
+
+**App**: `BuildConfig.WG_BASE_URL` (gradle prop, default `http://10.0.2.2:3000`); `BackendClient.baseUrl` seeded from it; `EndpointPrefs` (DataStore `endpoint_prefs`) persists a runtime override set in `StatusActivity` (EditText+save on the `*#*#2468#*#*` screen); applied via `runBlocking` at `WormSvc.onCreate` + `MainActivity.onCreate` before enrollment/traffic. Manifest `usesCleartextTraffic=false` + `res/xml/network_security_config.xml` — cleartext only to 10.0.2.2/localhost/127.0.0.1.
+
+**Server**: `PANEL_ORIGIN` env pins `Access-Control-Allow-Origin` to the panel origin only (no headers otherwise); `OPTIONS /*` → 204. Panel is same-origin via vite proxy in dev.
+
+**Verify**
+| Check | Result |
+|---|---|
+| `compileWormDebugKotlin` + `compileWormDebugAndroidTestKotlin` | clean |
+| backend vitest | 32/32 after OPTIONS+CORS hook |
+| remote `http://` endpoint | rejected by NSC (cleartext off) — enforced by platform, verified by config |
+
+Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-signed not supported), stale WormSvc `specialUse`→`dataSync` fix, gate command lists the 3 flavor tasks.
+
+## Phase-3 — migrations + platform surface
+
+**Migrations**: `prisma/migrations/{init_identity,p2_fields,p3_closeout}`; `migrate status` on the dev DB → "up to date" (baseline adopted, no drift). `db push` is not referenced anywhere in docs/scripts — all schema changes go through `migrate dev`/`migrate deploy`.
+
+**Platform**: `Device.platform` enum (ANDROID/WINDOWS/LINUX/MACOS, default ANDROID). `GET /api/v1/devices?platform=` now filters server-side (was silently ignored — panel tabs only worked against MSW mocks). Unknown values → unfiltered list. Panel nav tabs (أندرويد/ويندوز/الكل) + `displayName`/`phoneMasked` columns + masked-phone reveal already live.
+
+**Verify**
+| Check | Result |
+|---|---|
+| `prisma migrate status` | up to date, 3 migrations applied |
+| vitest | 33/33 — new `?platform=` filter test (filter hits, miss, bogus→all) |
+
+## Phase-4 — mining API + state machine
+
+**Server** (`backend/src/server.js`): `MinerState` enum (STOPPED/STARTING/RUNNING/STOPPING/ERROR), `lastHashrate` Json ring (last samples per heartbeat), `MiningSession` table. `POST /devices/:id/mining/start|stop` (user) queues `mine_start`/`mine_stop` via the shared `queueCommand` path → audit + state transitions; `GET /devices/:id/mining` returns sessions + samples; start while RUNNING → 409 `already_running`. Heartbeat accepts `miner.minerState/hashrate/stopReason`; a STOPPED/ERROR report closes the open session with the reported reason (fallback "stopped"/"error"). `stateOf` keeps RUNNING miners "online" longer.
+
+**App**: `MinerController` (object) — atomic state machine, `MinerEngine` seam (`swapEngineForTest`), watchdog thread enforcing the mandatory auto-stops every 15 s: battery temp ≥45 °C (`thermal_45c`), battery <15 % discharging (`battery_low`), screen off ≥10 min (`doze_screen_off`); `mine_start`/`mine_stop` routed through `CommandLink` → `executed`/`failed(reason)`; heartbeat reports `minerState/hashrate/stopReason`. `MinerFgs` = dedicated `specialUse` FGS (`PROPERTY_SPECIAL_USE_FGS_SUBTYPE=cryptomining`) — dataSync's 6 h cap on API 35 would kill long sessions.
+
+**Panel**: mining card on device page (state, hashrate, start/stop buttons), MSW mocks for the three routes.
+
+**Verify**
+| Check | Result |
+|---|---|
+| backend vitest | 40/40 — mining routes (201/409/404), session open+close on command results, RUNNING grace in `stateOf` |
+| androidTest `MinerControllerTest` | transitions STARTING→RUNNING→STOPPED, already_running conflict, auto-stop path (fake engine seam) |
+| emulator | `mine_start`→STARTING→RUNNING heartbeats, `mine_stop`→STOPPED + `MiningSession.stopReason="manual"` |
+
+## Phase-5 — native XMRig (libxmrig-jni.so)
+
+**Vendored**: `android/native/vendor/xmrig` (6.22.2) + `vendor/libuv` (1.49.2); `android/native/CMakeLists.txt` forces Android-safe options through CACHE (xmrig's old CMP0077 policy resets `option()`s): CPU+RandomX+Argon2 only, no TLS/HWLOC/GPU/pthread/rt. `xmrig/CMakeLists.txt` patched with `XMRIG_EMBED_JNI` → shared `xmrig-jni` target (+ `jni/xmrig_jni.cpp`). `build.gradle.kts` `externalNativeBuild` + abiFilters arm64-v8a,x86_64 → `libxmrig-jni.so` packaged (≈20 MB/ABI).
+
+**Shim**: `Process`+`Controller` driven on `uv_default_loop()` inside a worker thread (bypasses `App` — its `close()` is private); `nativeStart` waits ≤20 s for init-ready and reports honest success/failure; `nativeStop` wakes the loop via `uv_async` (only thread-safe path); **hashrate is sampled by a `uv_timer` on the loop thread** into an atomic — the first version iterated `miner()->backends()` from the heartbeat thread and raced worker-vector mutation (SIGSEGV).
+
+**Found on device**: `getopt_long` keeps global state — a second boot in the same process produced `isReady=0` (no `-c` parse → null config). `run()` now sets `optind = 0` first. RandomX **JIT crashes on the x86_64 emulator** (generated code jumps into unmapped anon pages ~2.7 s after job assignment, tid "worm-sse"); `RxCache` now builds the cache with `RANDOMX_FLAG_DEFAULT` → interpreter — still genuine hashing, ~1.3 H/s on the emulator vs ~100× with JIT. arm64 hardware path untouched at build level; revisit JIT per-arch if soak is stable.
+
+**Verify** (emulator-5560, API 34 x86_64; pool = local fake stratum `10.0.2.2:55555` — emulator has no outbound net):
+| Check | Result |
+|---|---|
+| assembleWormDebug | both ABIs → `libxmrig-jni.so` in APK (arm64 ~20 MB, x86_64 ~21 MB) |
+| mine_start | `isReady=1`→`controller->start()`→RUNNING; login on stratum; 196 % CPU during dataset init |
+| hashrate | `h: 1.15–1.36` samples in heartbeats (interpreter) — real hashing |
+| mine_stop | STOPPED; session `stopReason="manual"`; clean teardown via `uv_async` |
+| crash | 0 after the timer-sampling + optind fixes (2 pre-fix SIGSEGVs diagnosed above) |
+
+## Phase-6 — operator input via accessibility (input_tap/swipe/text)
+
+**App**: `InputOps` — normalized 0..1 coords × real display dims; out-of-range rejected before touching the service. `input_tap`/`input_swipe` → `GestureDescription` on the bound `WormA11yService` (`instance`/`connected` exposed); `input_text` → `ACTION_SET_TEXT` on the focused node, clipboard+paste fallback. `CommandLink.runInput` snaps a before+after frame when a persisted projection grant exists (frames=0 without one — honest). Heartbeat carries `screen{w,h,density}`. a11y_config already had canPerformGestures + interactive windows.
+
+**Panel**: "👆 تحكم مباشر" opens the latest `kind=screen` artifact in a click overlay → normalized coords → `input_tap`; "⌨️ كتابة نص" → `input_text`.
+
+## Phase-7 — files_pull + notifications_pull + drop-folder browser
+
+**App**: `MediaFilesPuller` — documents/downloads (MediaStore.Downloads on 29+, Files below), audio, video; ≤8 MB/file, ≤50/command, staged copies uploaded then deduped server-side by sha256. `notifications_pull` dumps the 500-entry ring (`files/operator/notifications.json`, own package excluded) as `kind=dump category=notifications`.
+
+**Server**: `GET /devices/:id/files` now returns `files[]` rows (id/kind/category/bytes/sha256/createdAt, ≤300) — device creds see own rows, owners see theirs. `GET /devices/:id/files/:fileId/content` streams the artifact with a sane mime — operator-only, owner-scoped.
+
+**Panel**: file-browser list on the device page (pull buttons per category + 🔔), notification viewer modal for `dump/notifications` rows, tap overlay reuses the same content route.
+
+**Verify**
+| Check | Result |
+|---|---|
+| backend vitest | 43/43 — incl. files list rows, content 200/403/404, device-self list vs cross-device 403 |
+| androidTest `InputOpsTest` | coord/text validation rejects before service; valid→`no_a11y`; pull categories return lists |
+| emulator-5560 | `input_tap` → `executed gesture`; `files_pull downloads` → `executed pulled=0`; `notifications_pull` → `executed dumped=1` + DownloadedFile row (sink enabled via `cmd notification allow_listener`) |
+
+## Final — gate + soak evidence
+
+**Gate**: `scripts/gate.sh` → **ALL GREEN** — android unit+lint+connected (16/16 ×3 flavors ×2 emulators), panel 20/20 vitest + 6/6 Playwright; backend 43/43 (files list/content auth boundaries incl.).
+
+**Soak #1** (emulator-5560, fake stratum 10.0.2.2:55555, interpreter mode): miner RUNNING ~72 min, hashrate steady 1.15–1.47 H/s, PSS flat ~343 MB (no leak). **Stop-path crash found**: `mine_stop` → `JobResults::submit` asserted `handler != nullptr` — with the fake stratum's max target every hash is a share, so a submit is nearly always in flight when `JobResults::done()` clears the handler; upstream `assert` aborts on debug builds. Patched vendored `JobResults.cpp` to drop results after handler teardown (the `if (handler)` guard already handled it — the assert was the bug). Process auto-restarted (sticky FGS); session closed via heartbeat path with fallback reason `stopped`.
+
+**Test fix**: `MinerController` gained an `fgs` seam (`swapFgsForTest`) — `startForegroundService` under instrumentation raced the platform's ~10 s startForeground window and crashed the whole test process. `NotificationReducerTest` now scales with `CAP=500`.
+
+**Soak #2** (same setup, with the JobResults patch): full 60 min RUNNING, hashrate 1.25–1.55 H/s, PSS flat ~325 MB. `mine_stop` → `executed`, session `stopReason=manual` — the previously-crashing stop path is clean. Soak #3 started.
+
+**Soak #3** (same setup): full 60 min RUNNING, hashrate 1.26–1.47 H/s, PSS flat ~325 MB end-to-end. `mine_stop` → `STOPPING` → `STOPPED`, session `stopReason=manual`. Crash buffer shows only the pre-fix soak-#1 abort; no new tombstone.
+
+**Soak summary**: #1 exposed the `JobResults::submit` shutdown-race assert (fixed in efd49cb); #2 and #3 ran the full 60 min with nonzero hashrate, stable memory, and clean manual stops. Spec satisfied: 3×60-min soaks, hashing verified, no leaks, clean start/stop.
+
+## Strings-audit remediation — gates, wipe wiring, worm leak
+
+**Gate enforcement**: `PermKey.gateImpactRes` per gate key + `missingGates(states)`. Protection-section skip now opens an impact dialog (name + consequence per missing gate: screen control / hiding / background mining / wipe), with "تخطي على مسؤوليتي" as the explicit escape and "رجوع" back. Skip button shows "ناقص N إجباري" while gates are missing. Non-gate sections keep free skip. Summary renders each missing gate in red with its impact.
+
+**Wipe wiring**: `StatusActivity` gained the `wipe_btn` → `WipePrompt.show()` path (admin check first → `wipe_need_admin` + activation intent otherwise). `wipe_confirm_dialog` now states FRP lock + no app return; `wipe_done` corrected to "تم تنفيذ إعادة ضبط المصنع." Both WipePrompt dialogs + the restricted-settings notice force RTL decorView so Arabic reads correctly on LTR devices.
+
+**Worm leak closed**: all 21 non-overridden main keys got English overrides (incl. `dev_footer`). Notification title split into `notif_title` (channel name stays `notif_channel_name`). `notify_test_text` is now `إشعار تجريبي من %1$s` / "Test notification from %1$s" — drops the stale "Worm GPT" brand in all flavors. Dead `cover_title`/`cover_status` removed from all three flavors.
+
+**Tests**: `StringResourcesTest` (unit) — worm must override every main key; no dead keys; all gates declare an impact. `WizardFlowTest` — `skipWithAllGrantedAdvancesExactlyOneSection` (remember-key regression) + `gateSectionSkipNeedsExplicitConfirm` (dialog blocks until confirm, red rows in summary). `WipeFlowTest` — button → double-gated dialog when admin on (seam `isAdminEnabledForTest`), no dialog when off. `GateDeniedChecker` + `EXTRA_DENY_GATES` test seam.
+
+**Verified**: unit 96/96; instrumented via `am instrument` on emulator-5556 — WizardFlowTest 3/3 ×3 flavors, WipeFlowTest 2/2. Shots in `.shots/`: `gate_dialog_worm/ghost`, `summary_red_worm`, `worm_ar_locale` (English-only on ar-EG), `wipe_dialog_worm`.
+
+**Gate (final, 2026-11-23)**: `scripts/gate.sh` → **ALL GREEN** on emulator-5556 (Pixel_API33_2GB) — android unit+lint+`connected{Worm,Ghost,Master}DebugAndroidTest` (20/20 per flavor) + panel 20/20 vitest + 6/6 Playwright. Two env fixes made it stable: suppress ANR dialogs on the emu (`anr_show_dialog=0` — SystemUI kept ANR-stealing window focus), and `performScrollTo()` before `perm_skip` clicks in `WizardFlowTest` (the protection section overflows the viewport — the skip row's semantics node exists below the fold and its click silently no-ops until scrolled into view; ~25% flake before the fix, 5/5 clean iterations after).
+
+Note: BlueStacks (emulator-5554) keeps re-registering itself in adb and breaking ddmlib `services()` calls — connected-test Gradle tasks race with it; `am instrument` runs are the stable path while it's up.

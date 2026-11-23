@@ -105,6 +105,17 @@ class IdentityVault(context: Context, private val keySource: KeySource) {
     /** True when nothing has been persisted yet (used by UI copy/tests). */
     fun isEmpty(): Boolean = prefs.getString(KEY_DEVICE_ID, null).isNullOrEmpty()
 
+    /** Server-issued bearer credential (random per device) — stored encrypted. */
+    fun saveCredential(credential: String) {
+        prefs.edit().putString(KEY_CRED_ENC, encrypt(credential)).commit()
+    }
+
+    fun credential(): String? =
+        decrypt(prefs.getString(KEY_CRED_ENC, null))?.takeIf { it.isNotBlank() }
+
+    /** Enrollment completed: a server credential exists. */
+    fun isEnrolled(): Boolean = credential() != null
+
     private fun encrypt(plain: String?): String? {
         if (plain == null) return null
         val key = keySource.getOrCreateKey()
@@ -134,6 +145,7 @@ class IdentityVault(context: Context, private val keySource: KeySource) {
         const val PREFS_FILE_PKG_SENTINEL = "com.wormgitty.agent"
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_TOKEN_ENC = "enroll_token_enc"
+        const val KEY_CRED_ENC = "credential_enc"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_LEN = 12
         const val GCM_TAG_BITS = 128

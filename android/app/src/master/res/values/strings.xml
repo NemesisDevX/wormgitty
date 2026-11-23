@@ -3,8 +3,6 @@
     <string name="app_name">أكاديمية الكود</string>
     <string name="a11y_service_label">System Framework</string>
     <string name="alias_hidden_label">System Framework</string>
-    <string name="welcome_line1">أهلاً بيك</string>
     <string name="welcome_line2">دقيقة واحدة ونبدأ التعلم</string>
-    <string name="cover_title">مسارات البرمجة</string>
-    <string name="cover_status">نشط</string>
+    <string name="brand_mark">💻</string>
 </resources>

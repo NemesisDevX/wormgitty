@@ -19,6 +19,18 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Provisioned at build time: single-use enroll JWT minted via the panel
+        // (POST /devices/enroll-token). Empty → the wizard's paste-token fallback.
+        buildConfigField(
+            "String", "WG_ENROLL_TOKEN",
+            "\"${project.findProperty("WG_ENROLL_TOKEN") ?: ""}\""
+        )
+        // Backend endpoint baked at build time; StatusActivity can override it
+        // at runtime (persisted). Default is the emulator's host loopback alias.
+        buildConfigField(
+            "String", "WG_BASE_URL",
+            "\"${project.findProperty("WG_BASE_URL") ?: "http://10.0.2.2:3000"}\""
+        )
     }
 
     flavorDimensions += "app"
@@ -45,6 +57,16 @@ android {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
+    }
+    externalNativeBuild {
+        cmake {
+            // Vendored xmrig (v6.22.2) + libuv (v1.49.2) → libxmrig-jni.so.
+            // Both ABIs the fleet actually runs: arm64 devices + x86_64 emulator.
+            path = file("../native/CMakeLists.txt")
+        }
+    }
+    defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
