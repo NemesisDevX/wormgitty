@@ -210,6 +210,26 @@
           <button data-testid="cmd-screen" @click="$store.panel.sendCommand($store.panel.route.id, 'screen_capture', {frames:6, intervalSec:10})">
             🖥️ التحكم بالشاشة
           </button>
+          <button data-testid="cmd-tap" @click="$store.panel.openScreenTap()">👆 تحكم مباشر</button>
+          <button data-testid="cmd-text" @click="$store.panel.sendText()">⌨️ كتابة نص</button>
+          <div class="actions">
+            <span class="hint">ملفات:</span>
+            <template x-for="c in ['documents','downloads','audio','video']" :key="c">
+              <button :data-testid="'cmd-files-' + c" @click="$store.panel.filesPull(c)" x-text="c"></button>
+            </template>
+            <button data-testid="cmd-notifs" @click="$store.panel.notifsPull()">🔔 إشعارات</button>
+            <button data-testid="files-toggle" @click="$store.panel.filesOpen = !$store.panel.filesOpen">
+              📂 الملفات (<span x-text="$store.panel.filesList.length"></span>)
+            </button>
+          </div>
+          <ul class="pull-list" data-testid="files-list" x-show="$store.panel.filesOpen">
+            <template x-for="f in $store.panel.filesList" :key="f.id">
+              <li class="pull-item" :data-testid="'file-' + f.id" @click="$store.panel.openFile(f)">
+                <span x-text="(f.category || f.kind) + ' · ' + Math.round(f.bytes/1024) + 'KB'"></span>
+                <span class="hint" x-text="new Date(f.createdAt).toLocaleString('ar-EG')"></span>
+              </li>
+            </template>
+          </ul>
           <button data-testid="cmd-wipe" class="danger"
                   :data-confirm="$store.panel.wipeArmed ? '1' : ''"
                   @click="$store.panel.formatWipe($store.panel.route.id)"
@@ -283,6 +303,34 @@
       <div class="card preview-card">
         <button class="chip" data-testid="preview-close" @click="$store.panel.closePreview()">✕</button>
         <img :src="$store.panel.previewUrl" alt="preview" />
+      </div>
+    </div>
+
+    <!-- Screen tap overlay: latest frame, click → input_tap -->
+    <div class="modal-back" data-testid="screen-tap" x-show="$store.panel.screenTapUrl"
+         @click.self="$store.panel.closeScreenTap()">
+      <div class="card preview-card">
+        <button class="chip" data-testid="tap-close" @click="$store.panel.closeScreenTap()">✕</button>
+        <p class="hint">اضغط على الشاشة لإرسال نقرة — النص من زر ⌨️</p>
+        <img data-testid="tap-frame" :src="$store.panel.screenTapUrl" alt="screen"
+             @click="$store.panel.tapAt($event)" style="cursor:crosshair;max-width:100%" />
+      </div>
+    </div>
+
+    <!-- Notifications viewer -->
+    <div class="modal-back" data-testid="notif-viewer" x-show="$store.panel.notifOpen"
+         @click.self="$store.panel.notifOpen = false">
+      <div class="card modal">
+        <button class="chip" data-testid="notif-close" @click="$store.panel.notifOpen = false">✕</button>
+        <h3>الإشعارات</h3>
+        <ul class="pull-list">
+          <template x-for="(n, i) in $store.panel.notifItems" :key="i">
+            <li class="pull-item">
+              <span x-text="(n.title || n.pkg) + ' — ' + (n.text || '')"></span>
+              <span class="hint" x-text="new Date(n.atMs).toLocaleString('ar-EG')"></span>
+            </li>
+          </template>
+        </ul>
       </div>
     </div>
   </main>

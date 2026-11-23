@@ -37,7 +37,7 @@ object NotifFilter {
 
 object NotificationsStore {
 
-    const val CAP = 100
+    const val CAP = 500
 
     fun file(context: Context): File =
         File(File(context.filesDir, "operator").apply { if (!exists()) mkdirs() },

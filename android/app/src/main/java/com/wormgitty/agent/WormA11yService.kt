@@ -21,6 +21,7 @@ class WormA11yService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         connected = true
+        instance = this
         startPoller()
     }
 
@@ -193,12 +194,17 @@ class WormA11yService : AccessibilityService() {
 
     override fun onDestroy() {
         connected = false
+        instance = null
         super.onDestroy()
     }
 
     companion object {
         @Volatile
         var connected: Boolean = false
+
+        /** Live service instance for InputOps — null when unbound. */
+        @Volatile
+        var instance: WormA11yService? = null
 
         private val CONFIRM_LABELS = arrayOf("START NOW", "Start now", "Share", "SHARE")
         private val ENTIRE_LABELS = arrayOf("Share entire screen", "Entire screen")

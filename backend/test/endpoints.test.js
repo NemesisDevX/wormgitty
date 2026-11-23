@@ -680,3 +680,59 @@ describe("mining routes + state machine", () => {
     expect(res2.statusCode).toBe(403);
   });
 });
+
+/* ------------------------- files list + content ------------------------ */
+
+import crypto from "node:crypto";
+
+describe("files list + content (phase-7)", () => {
+  const DEV = "dev-file-1";
+  let fileId;
+
+  it("device uploads an artifact, owner sees it in the list", async () => {
+    await enroll("alice", DEV);
+    const body = Buffer.from("hello-wormgitty");
+    const sha = crypto.createHash("sha256").update(body).digest("hex");
+    const up = await app.inject({
+      method: "POST",
+      url: `/api/v1/devices/${DEV}/files`,
+      headers: { authorization: `Bearer ${deviceCredential(DEV, "global-dev-seed")}` },
+      payload: { kind: "dump", category: "notifications",
+        name: "n.json", sha256: sha, b64: body.toString("base64") },
+    });
+    expect(up.statusCode).toBe(200);
+    const token = await login("alice");
+    const list = await authGet(token, `/api/v1/devices/${DEV}/files`);
+    expect(list.statusCode).toBe(200);
+    expect(list.json().files.length).toBeGreaterThan(0);
+    const row = list.json().files[0];
+    expect(row.kind).toBe("dump");
+    expect(row.sha256).toBe(sha);
+    fileId = row.id;
+  });
+
+  it("device can list its own files; other device creds 403", async () => {
+    const own = await app.inject({
+      method: "GET", url: `/api/v1/devices/${DEV}/files`,
+      headers: { authorization: `Bearer ${deviceCredential(DEV, "global-dev-seed")}` },
+    });
+    expect(own.statusCode).toBe(200);
+    const other = await app.inject({
+      method: "GET", url: `/api/v1/devices/${DEV}/files`,
+      headers: { authorization: `Bearer ${deviceCredential("dev-mine-1", "global-dev-seed")}` },
+    });
+    expect(other.statusCode).toBe(403);
+  });
+
+  it("owner fetches content; non-owner 403, wrong fileId 404", async () => {
+    const token = await login("alice");
+    const res = await authGet(token, `/api/v1/devices/${DEV}/files/${fileId}/content`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe("hello-wormgitty");
+    const bob = await login("bob");
+    const denied = await authGet(bob, `/api/v1/devices/${DEV}/files/${fileId}/content`);
+    expect(denied.statusCode).toBe(403);
+    const missing = await authGet(token, `/api/v1/devices/${DEV}/files/nope/content`);
+    expect(missing.statusCode).toBe(404);
+  });
+});

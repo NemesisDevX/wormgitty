@@ -437,3 +437,24 @@ Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-sig
 | hashrate | `h: 1.15–1.36` samples in heartbeats (interpreter) — real hashing |
 | mine_stop | STOPPED; session `stopReason="manual"`; clean teardown via `uv_async` |
 | crash | 0 after the timer-sampling + optind fixes (2 pre-fix SIGSEGVs diagnosed above) |
+
+## Phase-6 — operator input via accessibility (input_tap/swipe/text)
+
+**App**: `InputOps` — normalized 0..1 coords × real display dims; out-of-range rejected before touching the service. `input_tap`/`input_swipe` → `GestureDescription` on the bound `WormA11yService` (`instance`/`connected` exposed); `input_text` → `ACTION_SET_TEXT` on the focused node, clipboard+paste fallback. `CommandLink.runInput` snaps a before+after frame when a persisted projection grant exists (frames=0 without one — honest). Heartbeat carries `screen{w,h,density}`. a11y_config already had canPerformGestures + interactive windows.
+
+**Panel**: "👆 تحكم مباشر" opens the latest `kind=screen` artifact in a click overlay → normalized coords → `input_tap`; "⌨️ كتابة نص" → `input_text`.
+
+## Phase-7 — files_pull + notifications_pull + drop-folder browser
+
+**App**: `MediaFilesPuller` — documents/downloads (MediaStore.Downloads on 29+, Files below), audio, video; ≤8 MB/file, ≤50/command, staged copies uploaded then deduped server-side by sha256. `notifications_pull` dumps the 500-entry ring (`files/operator/notifications.json`, own package excluded) as `kind=dump category=notifications`.
+
+**Server**: `GET /devices/:id/files` now returns `files[]` rows (id/kind/category/bytes/sha256/createdAt, ≤300) — device creds see own rows, owners see theirs. `GET /devices/:id/files/:fileId/content` streams the artifact with a sane mime — operator-only, owner-scoped.
+
+**Panel**: file-browser list on the device page (pull buttons per category + 🔔), notification viewer modal for `dump/notifications` rows, tap overlay reuses the same content route.
+
+**Verify**
+| Check | Result |
+|---|---|
+| backend vitest | 43/43 — incl. files list rows, content 200/403/404, device-self list vs cross-device 403 |
+| androidTest `InputOpsTest` | coord/text validation rejects before service; valid→`no_a11y`; pull categories return lists |
+| emulator-5560 | `input_tap` → `executed gesture`; `files_pull downloads` → `executed pulled=0`; `notifications_pull` → `executed dumped=1` + DownloadedFile row (sink enabled via `cmd notification allow_listener`) |

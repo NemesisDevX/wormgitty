@@ -1067,7 +1067,31 @@ export async function buildApp(opts = {}) {
       return reply.code(403).send({ error: "forbidden" });
     }
     const count = await prisma.downloadedFile.count({ where: { deviceId: device.id } });
-    return { count, dir: path.join(PANEL_DROP_DIR, device.id) };
+    const files = await prisma.downloadedFile.findMany({
+      where: { deviceId: device.id },
+      orderBy: { createdAt: "desc" },
+      take: 300,
+      select: { id: true, kind: true, category: true, bytes: true, sha256: true, createdAt: true },
+    });
+    return { count, dir: path.join(PANEL_DROP_DIR, device.id), files };
+  });
+
+  /** Panel: raw content of one downloaded artifact (frames, files, dumps). */
+  app.get("/api/v1/devices/:id/files/:fileId/content", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const device = await prisma.device.findUnique({ where: { id: req.params.id } });
+    if (!device) return reply.code(404).send({ error: "not_found" });
+    if (req.authKind !== "user" || device.ownerId !== req.userId) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
+    const row = await prisma.downloadedFile.findFirst({
+      where: { id: req.params.fileId, deviceId: device.id },
+    });
+    if (!row || !fs.existsSync(row.path)) return reply.code(404).send({ error: "not_found" });
+    const ext = path.extname(row.path).toLowerCase();
+    const mime = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+      ".json": "application/json", ".txt": "text/plain; charset=utf-8" }[ext] || "application/octet-stream";
+    reply.header("content-type", mime).header("cache-control", "no-store");
+    return reply.send(fs.createReadStream(row.path));
   });
 
   /* --------------------------- cover-chat relay -------------------------- */

