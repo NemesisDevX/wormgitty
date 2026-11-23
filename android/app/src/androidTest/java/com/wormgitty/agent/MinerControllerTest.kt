@@ -34,12 +34,16 @@ class MinerControllerTest {
     }
 
     @Before
-    fun setUp() = MinerController.resetForTest(context)
+    fun setUp() {
+        MinerController.resetForTest(context)
+        MinerController.swapFgsForTest { _, _ -> }
+    }
 
     @After
     fun tearDown() {
         MinerController.resetForTest(context)
         MinerController.swapEngineForTest(null)
+        MinerController.swapFgsForTest(null)
     }
 
     private fun payload(json: String = """{"algo":"rx/0","pool":"p:443","wallet":"w","threads":2}""") =

@@ -26,6 +26,10 @@ object MinerController {
 
     private val state = AtomicReference(State.STOPPED)
     @Volatile private var engine: MinerEngine = NativeMiner
+    /** FGS start/stop — a seam so instrumentation isn't hostage to the
+     *  platform's ~10 s startForeground window under load. */
+    @Volatile private var fgs: (Context, Boolean) -> Unit =
+        { c, on -> if (on) MinerFgs.start(c) else MinerFgs.stop(c) }
     @Volatile private var stopReason: String? = null
     @Volatile private var config: Config = Config()
     @Volatile private var lastTransitionAt: Long = 0L
@@ -57,6 +61,11 @@ object MinerController {
         engine = e ?: NativeMiner
     }
 
+    /** androidTest seam: replace the FGS start/stop side-effect. */
+    internal fun swapFgsForTest(f: ((Context, Boolean) -> Unit)?) {
+        fgs = f ?: { c, on -> if (on) MinerFgs.start(c) else MinerFgs.stop(c) }
+    }
+
     internal fun resetForTest(context: Context) {
         if (state.get() != State.STOPPED) stop(context, "test")
         stopReason = null
@@ -82,14 +91,14 @@ object MinerController {
         )
         config = cfg
         stopReason = null
-        MinerFgs.start(context)
+        fgs(context, true)
         val ok = runCatching { engine.start(context, cfg) }.getOrElse {
             Log.e("MinerController", "engine start threw", it); false
         }
         if (!ok) {
             state.set(State.ERROR)
             stopReason = "engine_unavailable"
-            MinerFgs.stop(context)
+            fgs(context, false)
             return "failed" to "engine_unavailable"
         }
         state.set(State.RUNNING)
@@ -106,7 +115,7 @@ object MinerController {
         stopReason = reason
         disarmWatchdog(context)
         runCatching { engine.stop() }
-        MinerFgs.stop(context)
+        fgs(context, false)
         state.set(if (reason == "error") State.ERROR else State.STOPPED)
         return "executed" to reason
     }
