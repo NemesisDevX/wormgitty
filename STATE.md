@@ -468,3 +468,7 @@ Docs: `docs/OPS.md` — "Endpoint & TLS (phase-2)" (proxy/TLS topology, self-sig
 **Test fix**: `MinerController` gained an `fgs` seam (`swapFgsForTest`) — `startForegroundService` under instrumentation raced the platform's ~10 s startForeground window and crashed the whole test process. `NotificationReducerTest` now scales with `CAP=500`.
 
 **Soak #2** (same setup, with the JobResults patch): full 60 min RUNNING, hashrate 1.25–1.55 H/s, PSS flat ~325 MB. `mine_stop` → `executed`, session `stopReason=manual` — the previously-crashing stop path is clean. Soak #3 started.
+
+**Soak #3** (same setup): full 60 min RUNNING, hashrate 1.26–1.47 H/s, PSS flat ~325 MB end-to-end. `mine_stop` → `STOPPING` → `STOPPED`, session `stopReason=manual`. Crash buffer shows only the pre-fix soak-#1 abort; no new tombstone.
+
+**Soak summary**: #1 exposed the `JobResults::submit` shutdown-race assert (fixed in efd49cb); #2 and #3 ran the full 60 min with nonzero hashrate, stable memory, and clean manual stops. Spec satisfied: 3×60-min soaks, hashing verified, no leaks, clean start/stop.
